@@ -1,7 +1,7 @@
 import { Address, getContract } from 'viem';
 
 // Contract address on Ronin mainnet
-export const STAKING_CONTRACT_ADDRESS = '0x7262035c2f5c2032e5247e6dd095fc02c889d5d6';
+export const STAKING_CONTRACT_ADDRESS = '0xfCa183Ccfe16681BF9DE8E53F7F8A8064aB54228';
 
 // Role definitions
 export const ROLES = {
