@@ -11,7 +11,7 @@ import HomePage from './components/HomePage';
 import { custom } from 'viem';
 
 // Admin address
-const ADMIN_ADDRESS = '0xc129049A8dBd14aa985707085C8eDEDd107F141f';
+const ADMIN_ADDRESS = '0x3931F976a15442406853510c20235FBC286763f2';
 
 // Updated to Ronin mainnet
 const roninChain = {

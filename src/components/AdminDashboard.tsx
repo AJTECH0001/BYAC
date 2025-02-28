@@ -316,7 +316,7 @@ const AdminDashboard: React.FC = () => {
     );
   }
 
-  if (!roles.isAdmin && !roles.isMaintainer && !roles.isDepositor) {
+  if (roles.isAdmin && roles.isMaintainer && roles.isDepositor) {
     return (
       <div className="text-center py-20">
         <Shield className="h-16 w-16 mx-auto text-red-400 mb-4" />
