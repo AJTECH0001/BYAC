@@ -145,12 +145,13 @@ const AdminDashboard: React.FC = () => {
   useEffect(() => {
     if (isConnected && address) {
       fetchData();
-      
+
       // Set up polling
       const interval = setInterval(fetchData, 30000);
       return () => clearInterval(interval);
     }
-  }, [isConnected, address]);
+  }, [isConnected, address, publicClient]); // Added publicClient to dependency array
+
 
   // Validate reward amount input
   const validateRewardAmount = (amount: string): boolean => {
