@@ -2,7 +2,7 @@ import { ethers } from 'ethers';
 import dotenv from 'dotenv';
 import { writeFileSync, mkdirSync, existsSync } from 'fs';
 import { join } from 'path';
-import StakingPool from '../contracts/StakingPool.sol';
+import { createRequire } from 'module';
 
 // Load environment variables
 dotenv.config();
@@ -73,6 +73,8 @@ const deploy = async () => {
     log.info('Deploying StakingPool contract...');
     
     // Deploy contract
+    const require = createRequire(import.meta.url);
+    const StakingPool = require('../artifacts/contracts/StakingPool.sol/StakingPool.json');
     const StakingPoolFactory = new ethers.ContractFactory(
       StakingPool.abi,
       StakingPool.bytecode,

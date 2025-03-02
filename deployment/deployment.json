@@ -1,0 +1,10 @@
+{
+  "timestamp": "2025-03-02T12:25:24.875Z",
+  "environment": "production",
+  "network": "ronin",
+  "deployer": "0xc129049A8dBd14aa985707085C8eDEDd107F141f",
+  "contracts": {
+    "stakingPool": "0x04A4b12590Ec18a1778Be9fd8cB4b240aDd699BE",
+    "braidsToken": "0xD144A6466aA76Cc3A892Fda9602372dd884a2C90"
+  }
+}

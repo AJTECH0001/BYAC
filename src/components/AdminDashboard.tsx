@@ -128,6 +128,8 @@ const AdminDashboard: React.FC = () => {
         checkRole(publicClient, address, 'DEPOSITOR')
       ]);
 
+      
+
       setStakingStats(newStakingStats);
       setRoles({
         isAdmin: adminRole,
@@ -317,15 +319,15 @@ const AdminDashboard: React.FC = () => {
     );
   }
 
-  if (roles.isAdmin && roles.isMaintainer && roles.isDepositor) {
-    return (
-      <div className="text-center py-20">
-        <Shield className="h-16 w-16 mx-auto text-red-400 mb-4" />
-        <h2 className="text-2xl font-semibold mb-2">Access Denied</h2>
-        <p className="text-gray-400">You don't have permission to access admin features</p>
-      </div>
-    );
-  }
+  if (!roles.isAdmin && !roles.isMaintainer && !roles.isDepositor) {
+  return (
+    <div className="text-center py-20">
+      <Shield className="h-16 w-16 mx-auto text-red-400 mb-4" />
+      <h2 className="text-2xl font-semibold mb-2">Access Denied</h2>
+      <p className="text-gray-400">You don't have permission to access admin features</p>
+    </div>
+  );
+}
 
   return (
     <div className="space-y-8">
