@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useAccount, usePublicClient, useContractWrite, useWaitForTransactionReceipt } from 'wagmi';
 import { parseEther, formatEther } from 'viem';
 import { Shield, Pause, Play, Coins, Settings, AlertCircle, Check, Loader2 } from 'lucide-react';
-import { STAKING_CONTRACT_ADDRESS, STAKING_ABI, getStakingStats, checkRole, ROLES, StakingStats } from '../contracts/StakingContract';
+import { STAKING_CONTRACT_ADDRESS, STAKING_ABI, getStakingStats, checkRole,  StakingStats } from '../contracts/StakingContract';
 
 // Define transaction status type
 type TransactionStatus = 'idle' | 'preparing' | 'pending' | 'success' | 'error';
@@ -116,20 +116,24 @@ const AdminDashboard: React.FC = () => {
 
   const fetchData = async () => {
     if (!address || !publicClient) return;
-
+  
     try {
       setLoading(true);
       setError(null);
-
+  
+      // Add network validation
+      const chainId = await publicClient.getChainId();
+      if (chainId !== 2020) { // Ronin mainnet chain ID
+        throw new Error('Please connect to Ronin mainnet');
+      }
+  
       const [newStakingStats, adminRole, maintainerRole, depositorRole] = await Promise.all([
         getStakingStats(publicClient),
         checkRole(publicClient, address, 'ADMIN'),
         checkRole(publicClient, address, 'MAINTAINER'),
         checkRole(publicClient, address, 'DEPOSITOR')
       ]);
-
-      
-
+  
       setStakingStats(newStakingStats);
       setRoles({
         isAdmin: adminRole,
@@ -144,6 +148,45 @@ const AdminDashboard: React.FC = () => {
     }
   };
 
+  const handleTransaction = async (
+    action: () => Promise<{ hash: `0x${string}` }>,
+    type: 'reward' | 'pause' | 'deposit'
+  ) => {
+    const statusSetters = {
+      reward: setRewardTxStatus,
+      pause: setPauseTxStatus,
+      deposit: setDepositTxStatus
+    };
+    
+    const hashSetters = {
+      reward: setRewardTxHash,
+      pause: setPauseTxHash,
+      deposit: setDepositTxHash
+    };
+
+    try {
+      statusSetters[type]('preparing');
+      setError(null);
+      const tx = await action();
+      hashSetters[type](tx.hash);
+      statusSetters[type]('pending');
+    } catch (err: any) {
+      statusSetters[type]('error');
+      handleTransactionError(err);
+    }
+  };
+
+  const handleTransactionError = (error: any) => {
+    console.error('Transaction error:', error);
+    if (error.code === 4001) {
+      setError('User rejected transaction');
+    } else if (error.message?.includes('insufficient funds')) {
+      setError('Insufficient funds for transaction');
+    } else {
+      setError(error.shortMessage || error.message || 'Transaction failed');
+    }
+  };
+
   useEffect(() => {
     if (isConnected && address) {
       fetchData();
@@ -154,35 +197,22 @@ const AdminDashboard: React.FC = () => {
     }
   }, [isConnected, address, publicClient]); // Added publicClient to dependency array
 
+  const setErrorState = (type: 'reward' | 'deposit', message: string) => {
+    if (type === 'reward') setRewardInputError(message);
+    else setDepositInputError(message);
+    return false;
+  };
 
   // Validate reward amount input
   const validateRewardAmount = (amount: string): boolean => {
-    if (!amount) {
-      setRewardInputError('Amount is required');
-      return false;
-    }
-
+    if (!amount) return setErrorState('reward', 'Amount is required');
+    
     const numAmount = parseFloat(amount);
-    if (isNaN(numAmount)) {
-      setRewardInputError('Invalid number');
-      return false;
-    }
-
-    if (numAmount <= 0) {
-      setRewardInputError('Amount must be greater than zero');
-      return false;
-    }
-
-    if (numAmount < parseFloat(MIN_REWARD_AMOUNT)) {
-      setRewardInputError(`Minimum amount is ${MIN_REWARD_AMOUNT}`);
-      return false;
-    }
-
-    if (numAmount > parseFloat(MAX_REWARD_AMOUNT)) {
-      setRewardInputError(`Maximum amount is ${MAX_REWARD_AMOUNT}`);
-      return false;
-    }
-
+    if (isNaN(numAmount)) return setErrorState('reward', 'Invalid number format');
+    if (numAmount <= 0) return setErrorState('reward', 'Must be greater than 0');
+    if (numAmount < parseFloat(MIN_REWARD_AMOUNT)) return setErrorState('reward', `Minimum ${MIN_REWARD_AMOUNT}`);
+    if (numAmount > parseFloat(MAX_REWARD_AMOUNT)) return setErrorState('reward', `Maximum ${MAX_REWARD_AMOUNT}`);
+    
     setRewardInputError(null);
     return true;
   };
@@ -210,103 +240,47 @@ const AdminDashboard: React.FC = () => {
   };
 
   const handleSetRewards = async () => {
-    if (!validateRewardAmount(rewardAmount) || rewardTxStatus === 'pending' || rewardTxStatus === 'preparing') return;
-
-    try {
-      setRewardTxStatus('preparing');
-      setError(null);
-      
-      const tx = await notifyReward({ 
-        args: [parseEther(rewardAmount)] 
-      });
-      
-      setRewardTxHash(tx.hash);
-      setRewardTxStatus('pending');
-      setRewardAmount('');
-    } catch (err: any) {
-      console.error('Setting rewards failed:', err);
-      setRewardTxStatus('error');
-      
-      if (err.code === 4001) {
-        setError('User rejected the transaction');
-      } else if (err.message?.includes('insufficient funds')) {
-        setError('Insufficient funds for this transaction');
-      } else {
-        setError(`Failed to set rewards: ${err.message || 'Unknown error'}`);
-      }
-    }
+    if (!validateRewardAmount(rewardAmount) || rewardTxStatus !== 'idle') return;
+    await handleTransaction(
+      () => notifyReward({ args: [parseEther(rewardAmount)] }),
+      'reward'
+    );
+    setRewardAmount('');
   };
-
+  
   const handlePauseToggle = async () => {
-    if (pauseTxStatus === 'pending' || pauseTxStatus === 'preparing') return;
-
-    try {
-      setPauseTxStatus('preparing');
-      setError(null);
-      
-      let tx;
-      if (stakingStats?.isPaused) {
-        tx = await unpause();
-      } else {
-        tx = await pause();
-      }
-      
-      setPauseTxHash(tx.hash);
-      setPauseTxStatus('pending');
-    } catch (err: any) {
-      console.error('Pause toggle failed:', err);
-      setPauseTxStatus('error');
-      
-      if (err.code === 4001) {
-        setError('User rejected the transaction');
-      } else {
-        setError(`Failed to ${stakingStats?.isPaused ? 'unpause' : 'pause'} staking: ${err.message || 'Unknown error'}`);
-      }
-    }
+    if (pauseTxStatus !== 'idle') return;
+    const action = stakingStats?.isPaused ? unpause : pause;
+    await handleTransaction(action, 'pause');
   };
-
+  
   const handleDepositRewards = async () => {
-    if (!validateDepositAmount(depositAmount) || depositTxStatus === 'pending' || depositTxStatus === 'preparing') return;
-
-    try {
-      setDepositTxStatus('preparing');
-      setError(null);
-      
-      const tx = await depositRewards({ 
-        args: [parseEther(depositAmount)] 
-      });
-      
-      setDepositTxHash(tx.hash);
-      setDepositTxStatus('pending');
-      setDepositAmount('');
-    } catch (err: any) {
-      console.error('Depositing rewards failed:', err);
-      setDepositTxStatus('error');
-      
-      if (err.code === 4001) {
-        setError('User rejected the transaction');
-      } else if (err.message?.includes('insufficient funds')) {
-        setError('Insufficient funds for this transaction');
-      } else {
-        setError(`Failed to deposit rewards: ${err.message || 'Unknown error'}`);
-      }
-    }
+    if (!validateDepositAmount(depositAmount) || depositTxStatus !== 'idle') return;
+    await handleTransaction(
+      () => depositRewards({ args: [parseEther(depositAmount)] }),
+      'deposit'
+    );
+    setDepositAmount('');
   };
 
   // Helper for rendering transaction status
   const renderTxStatus = (status: TransactionStatus, actionName: string) => {
-    switch (status) {
-      case 'preparing':
-        return <span className="text-xs text-yellow-400 flex items-center mt-2"><Loader2 className="h-3 w-3 mr-1 animate-spin" /> Preparing {actionName}...</span>;
-      case 'pending':
-        return <span className="text-xs text-yellow-400 flex items-center mt-2"><Loader2 className="h-3 w-3 mr-1 animate-spin" /> {actionName} pending...</span>;
-      case 'success':
-        return <span className="text-xs text-green-400 flex items-center mt-2"><Check className="h-3 w-3 mr-1" /> {actionName} successful!</span>;
-      case 'error':
-        return <span className="text-xs text-red-400 flex items-center mt-2"><AlertCircle className="h-3 w-3 mr-1" /> {actionName} failed</span>;
-      default:
-        return null;
-    }
+    const statusConfig = {
+      preparing: { text: 'Preparing', icon: Loader2, color: 'yellow' },
+      pending: { text: 'Processing', icon: Loader2, color: 'yellow' },
+      success: { text: 'Successful', icon: Check, color: 'green' },
+      error: { text: 'Failed', icon: AlertCircle, color: 'red' }
+    };
+
+    const config = statusConfig[status];
+    if (!config) return null;
+
+    return (
+      <span className={`text-xs text-${config.color}-400 flex items-center mt-2`}>
+        <config.icon className={`h-3 w-3 mr-1 ${status !== 'success' ? 'animate-spin' : ''}`} />
+        {config.text} {actionName}
+      </span>
+    );
   };
 
   if (!isConnected || !address) {
@@ -319,15 +293,16 @@ const AdminDashboard: React.FC = () => {
     );
   }
 
+  // Replace the existing role check condition
   if (!roles.isAdmin && !roles.isMaintainer && !roles.isDepositor) {
-  return (
-    <div className="text-center py-20">
-      <Shield className="h-16 w-16 mx-auto text-red-400 mb-4" />
-      <h2 className="text-2xl font-semibold mb-2">Access Denied</h2>
-      <p className="text-gray-400">You don't have permission to access admin features</p>
-    </div>
-  );
-}
+    return (
+      <div className="text-center py-20">
+        <Shield className="h-16 w-16 mx-auto text-red-400 mb-4" />
+        <h2 className="text-2xl font-semibold mb-2">Access Denied</h2>
+        <p className="text-gray-400">You don't have permission to access admin features</p>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-8">

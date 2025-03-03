@@ -1,7 +1,7 @@
-import { Address, getContract } from 'viem';
+import { Address, getContract, PublicClient } from 'viem';
 
 // Contract address on Ronin mainnet
-export const STAKING_CONTRACT_ADDRESS = '0x3B7C0285284949C08e468C92D4724cb4Bd619Ada';
+export const STAKING_CONTRACT_ADDRESS = '0x7262035c2f5c2032e5247e6dd095fc02c889d5d6';
 
 // Role definitions
 export const ROLES = {
@@ -12,7 +12,6 @@ export const ROLES = {
 
 // ABI for the staking contract
 export const STAKING_ABI = [
-  // View Functions
   {
     inputs: [{ name: 'account', type: 'address' }],
     name: 'balanceOf',
@@ -72,7 +71,6 @@ export const STAKING_ABI = [
     stateMutability: 'view',
     type: 'function'
   },
-  // User Actions
   {
     inputs: [{ name: 'amount', type: 'uint256' }],
     name: 'stake',
@@ -101,7 +99,6 @@ export const STAKING_ABI = [
     stateMutability: 'nonpayable',
     type: 'function'
   },
-  // Admin Actions
   {
     inputs: [{ name: 'reward', type: 'uint256' }],
     name: 'notifyRewardAmount',
@@ -146,18 +143,24 @@ export interface UserStats {
   stakingTime: bigint;
 }
 
-export const getStakingStats = async (publicClient: any): Promise<StakingStats> => {
+export const getStakingStats = async (publicClient: PublicClient): Promise<StakingStats> => {
   try {
-    const contract = getContract({
-      address: STAKING_CONTRACT_ADDRESS as Address,
-      abi: STAKING_ABI,
-      publicClient,
-    });
-
     const [totalStaked, rewardRate, isPaused] = await Promise.all([
-      contract.read.totalSupply(),
-      contract.read.rewardRate(),
-      contract.read.paused()
+      publicClient.readContract({
+        address: STAKING_CONTRACT_ADDRESS,
+        abi: STAKING_ABI,
+        functionName: 'totalSupply',
+      }) as Promise<bigint>,
+      publicClient.readContract({
+        address: STAKING_CONTRACT_ADDRESS,
+        abi: STAKING_ABI,
+        functionName: 'rewardRate',
+      }) as Promise<bigint>,
+      publicClient.readContract({
+        address: STAKING_CONTRACT_ADDRESS,
+        abi: STAKING_ABI,
+        functionName: 'paused',
+      }) as Promise<boolean>
     ]);
 
     return {
@@ -167,61 +170,57 @@ export const getStakingStats = async (publicClient: any): Promise<StakingStats> 
       isPaused
     };
   } catch (error) {
-    console.error('Error fetching staking stats:', error);
-    // Return default values if there's an error
-    return {
-      totalStaked: BigInt(0),
-      rewardRate: BigInt(0),
-      rewardForDuration: BigInt(0),
-      isPaused: false
-    };
+    console.error('Error in getStakingStats:', error);
+    throw new Error('Failed to fetch staking stats');
   }
 };
 
-export const getUserStats = async (publicClient: any, address: string): Promise<UserStats> => {
+export const getUserStats = async (publicClient: PublicClient, address: Address): Promise<UserStats> => {
   try {
-    const contract = getContract({
-      address: STAKING_CONTRACT_ADDRESS as Address,
-      abi: STAKING_ABI,
-      publicClient,
-    });
-
     const [stakedAmount, earnedRewards, stakingPoints, stakingTime] = await Promise.all([
-      contract.read.balanceOf([address as Address]),
-      contract.read.earned([address as Address]),
-      contract.read.userPoints([address as Address]),
-      contract.read.stakingTime([address as Address])
+      publicClient.readContract({
+        address: STAKING_CONTRACT_ADDRESS,
+        abi: STAKING_ABI,
+        functionName: 'balanceOf',
+        args: [address]
+      }) as Promise<bigint>,
+      publicClient.readContract({
+        address: STAKING_CONTRACT_ADDRESS,
+        abi: STAKING_ABI,
+        functionName: 'earned',
+        args: [address]
+      }) as Promise<bigint>,
+      publicClient.readContract({
+        address: STAKING_CONTRACT_ADDRESS,
+        abi: STAKING_ABI,
+        functionName: 'userPoints',
+        args: [address]
+      }) as Promise<bigint>,
+      publicClient.readContract({
+        address: STAKING_CONTRACT_ADDRESS,
+        abi: STAKING_ABI,
+        functionName: 'stakingTime',
+        args: [address]
+      }) as Promise<bigint>
     ]);
 
-    return {
-      stakedAmount,
-      earnedRewards,
-      stakingPoints,
-      stakingTime
-    };
+    return { stakedAmount, earnedRewards, stakingPoints, stakingTime };
   } catch (error) {
     console.error('Error fetching user stats:', error);
-    // Return default values if there's an error
-    return {
-      stakedAmount: BigInt(0),
-      earnedRewards: BigInt(0),
-      stakingPoints: BigInt(0),
-      stakingTime: BigInt(0)
-    };
+    throw new Error('Failed to fetch user stats');
   }
 };
 
-export const checkRole = async (publicClient: any, address: string, role: keyof typeof ROLES): Promise<boolean> => {
+export const checkRole = async (publicClient: PublicClient, address: Address, role: keyof typeof ROLES): Promise<boolean> => {
   try {
-    const contract = getContract({
-      address: STAKING_CONTRACT_ADDRESS as Address,
+    return await publicClient.readContract({
+      address: STAKING_CONTRACT_ADDRESS,
       abi: STAKING_ABI,
-      publicClient,
-    });
-
-    return contract.read.hasRole([ROLES[role], address as Address]);
+      functionName: 'hasRole',
+      args: [ROLES[role], address]
+    }) as boolean;
   } catch (error) {
-    console.error(`Error checking role ${role}:`, error);
+    console.error(`Role check failed for ${role}:`, error);
     return false;
   }
 };
