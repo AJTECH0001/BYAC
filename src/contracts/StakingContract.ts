@@ -1,4 +1,4 @@
-import { Address, getContract, PublicClient } from 'viem';
+import { Address, PublicClient } from 'viem';
 
 // Contract address on Ronin mainnet
 export const STAKING_CONTRACT_ADDRESS = '0x7262035c2f5c2032e5247e6dd095fc02c889d5d6';
@@ -143,84 +143,126 @@ export interface UserStats {
   stakingTime: bigint;
 }
 
-export const getStakingStats = async (publicClient: PublicClient): Promise<StakingStats> => {
+/**
+ * Helper to safely read contract values.
+ * Accepts a function returning a Promise<T> and a fallback value in case of error.
+ */
+const safeRead = async <T>(fn: () => Promise<T>, fallback: T): Promise<T> => {
   try {
-    const [totalStaked, rewardRate, isPaused] = await Promise.all([
-      publicClient.readContract({
-        address: STAKING_CONTRACT_ADDRESS,
-        abi: STAKING_ABI,
-        functionName: 'totalSupply',
-      }) as Promise<bigint>,
-      publicClient.readContract({
-        address: STAKING_CONTRACT_ADDRESS,
-        abi: STAKING_ABI,
-        functionName: 'rewardRate',
-      }) as Promise<bigint>,
-      publicClient.readContract({
-        address: STAKING_CONTRACT_ADDRESS,
-        abi: STAKING_ABI,
-        functionName: 'paused',
-      }) as Promise<boolean>
-    ]);
-
-    return {
-      totalStaked,
-      rewardRate,
-      rewardForDuration: rewardRate * BigInt(604800), // 1 week of rewards
-      isPaused
-    };
+    return await fn();
   } catch (error) {
-    console.error('Error in getStakingStats:', error);
-    throw new Error('Failed to fetch staking stats');
+    if (error instanceof Error && error.message.includes("Wallet connection failed")) {
+      console.warn("Wallet connection failed during contract read, returning fallback value.");
+    } else {
+      console.error("Contract read error:", error);
+    }
+    return fallback;
   }
 };
 
-export const getUserStats = async (publicClient: PublicClient, address: Address): Promise<UserStats> => {
-  try {
-    const [stakedAmount, earnedRewards, stakingPoints, stakingTime] = await Promise.all([
+export const getStakingStats = async (publicClient: PublicClient): Promise<StakingStats> => {
+  const totalStaked = await safeRead(
+    () =>
+      publicClient.readContract({
+        address: STAKING_CONTRACT_ADDRESS,
+        abi: STAKING_ABI,
+        functionName: 'totalSupply'
+      }),
+    0n
+  );
+
+  const rewardRate = await safeRead(
+    () =>
+      publicClient.readContract({
+        address: STAKING_CONTRACT_ADDRESS,
+        abi: STAKING_ABI,
+        functionName: 'rewardRate'
+      }),
+    0n
+  );
+
+  const isPaused = await safeRead(
+    () =>
+      publicClient.readContract({
+        address: STAKING_CONTRACT_ADDRESS,
+        abi: STAKING_ABI,
+        functionName: 'paused'
+      }),
+    false
+  );
+
+  return {
+    totalStaked,
+    rewardRate,
+    rewardForDuration: rewardRate * BigInt(604800), // 1 week of rewards (604800 seconds)
+    isPaused
+  };
+};
+
+export const getUserStats = async (
+  publicClient: PublicClient,
+  address: Address
+): Promise<UserStats> => {
+  const stakedAmount = await safeRead(
+    () =>
       publicClient.readContract({
         address: STAKING_CONTRACT_ADDRESS,
         abi: STAKING_ABI,
         functionName: 'balanceOf',
         args: [address]
-      }) as Promise<bigint>,
+      }),
+    0n
+  );
+
+  const earnedRewards = await safeRead(
+    () =>
       publicClient.readContract({
         address: STAKING_CONTRACT_ADDRESS,
         abi: STAKING_ABI,
         functionName: 'earned',
         args: [address]
-      }) as Promise<bigint>,
+      }),
+    0n
+  );
+
+  const stakingPoints = await safeRead(
+    () =>
       publicClient.readContract({
         address: STAKING_CONTRACT_ADDRESS,
         abi: STAKING_ABI,
         functionName: 'userPoints',
         args: [address]
-      }) as Promise<bigint>,
+      }),
+    0n
+  );
+
+  const stakingTime = await safeRead(
+    () =>
       publicClient.readContract({
         address: STAKING_CONTRACT_ADDRESS,
         abi: STAKING_ABI,
         functionName: 'stakingTime',
         args: [address]
-      }) as Promise<bigint>
-    ]);
+      }),
+    0n
+  );
 
-    return { stakedAmount, earnedRewards, stakingPoints, stakingTime };
-  } catch (error) {
-    console.error('Error fetching user stats:', error);
-    throw new Error('Failed to fetch user stats');
-  }
+  return { stakedAmount, earnedRewards, stakingPoints, stakingTime };
 };
 
-export const checkRole = async (publicClient: PublicClient, address: Address, role: keyof typeof ROLES): Promise<boolean> => {
-  try {
-    return await publicClient.readContract({
-      address: STAKING_CONTRACT_ADDRESS,
-      abi: STAKING_ABI,
-      functionName: 'hasRole',
-      args: [ROLES[role], address]
-    }) as boolean;
-  } catch (error) {
-    console.error(`Role check failed for ${role}:`, error);
-    return false;
-  }
+export const checkRole = async (
+  publicClient: PublicClient,
+  address: Address,
+  role: keyof typeof ROLES
+): Promise<boolean> => {
+  return await safeRead(
+    () =>
+      publicClient.readContract({
+        address: STAKING_CONTRACT_ADDRESS,
+        abi: STAKING_ABI,
+        functionName: 'hasRole',
+        args: [ROLES[role], address]
+      }),
+    false
+  );
 };
