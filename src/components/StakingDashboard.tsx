@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useAccount, useBalance, usePublicClient, useContractWrite } from 'wagmi';
+import { useAccount, useBalance, usePublicClient, useWriteContract } from 'wagmi';
 import { parseEther, formatEther } from 'viem';
 import { Coins, Wallet, Award, Eye, EyeOff } from 'lucide-react';
 import {
@@ -9,7 +9,7 @@ import {
   getUserStats,
 } from '../contracts/StakingContract';
 import { BRAIDS_TOKEN_ADDRESS } from '../utils/alchemy';
-import Modal from './Modal'; // Make sure this path points to your Modal component
+import Modal from './Modal';
 
 interface WalletStatus {
   isInstalled: boolean;
@@ -23,53 +23,26 @@ interface StakingDashboardProps {
 const StakingDashboard: React.FC<StakingDashboardProps> = ({ walletStatus }) => {
   const { address, isConnected } = useAccount();
   const publicClient = usePublicClient();
+  const { writeContractAsync } = useWriteContract();
 
   const [stakingStats, setStakingStats] = useState<any>(null);
   const [userStats, setUserStats] = useState<any>(null);
-
-  // Amount states
   const [stakeAmount, setStakeAmount] = useState('');
   const [unstakeAmount, setUnstakeAmount] = useState('');
-
-  // Hide/Show numbers toggle
   const [hideNumbers, setHideNumbers] = useState(false);
-
-  // Modal states
   const [isStakeModalOpen, setIsStakeModalOpen] = useState(false);
   const [isUnstakeModalOpen, setIsUnstakeModalOpen] = useState(false);
-
   const [error, setError] = useState<string | null>(null);
   const [transactionInProgress, setTransactionInProgress] = useState(false);
-
-  // Contract writes
-  const { writeAsync: stake } = useContractWrite({
-    address: STAKING_CONTRACT_ADDRESS,
-    abi: STAKING_ABI,
-    functionName: 'stake',
-  });
-  const { writeAsync: withdraw } = useContractWrite({
-    address: STAKING_CONTRACT_ADDRESS,
-    abi: STAKING_ABI,
-    functionName: 'withdraw',
-  });
-  const { writeAsync: getReward } = useContractWrite({
-    address: STAKING_CONTRACT_ADDRESS,
-    abi: STAKING_ABI,
-    functionName: 'getReward',
-  });
-
-  // Price and supply placeholders
   const [tokenPrice, setTokenPrice] = useState(1000.00);
   const [circulatingSupply, setCirculatingSupply] = useState(159_155_561n);
 
-  // Token balance
   const { data: braidsBalance } = useBalance({
     address,
     token: BRAIDS_TOKEN_ADDRESS as `0x${string}`,
     watch: true,
   });
 
-  // Calculate APR example
   const calculateAPR = () => {
     if (!stakingStats?.dailyRewards || !stakingStats?.totalStaked) return 0;
     const dailyRewards = Number(formatEther(stakingStats.dailyRewards));
@@ -77,15 +50,13 @@ const StakingDashboard: React.FC<StakingDashboardProps> = ({ walletStatus }) => 
     return totalStaked > 0 ? ((dailyRewards * 365) / totalStaked) * 100 : 0;
   };
 
-  // Fetch staking and user data
   const fetchData = async () => {
     if (!address || !publicClient) return;
     try {
       setError(null);
       const chainId = await publicClient.getChainId();
-      if (chainId !== 2020) {
-        throw new Error('Please connect to Ronin Mainnet');
-      }
+      if (chainId !== 2020) throw new Error('Please connect to Ronin Mainnet');
+      
       const [newStakingStats, newUserStats] = await Promise.all([
         getStakingStats(publicClient).catch(() => null),
         getUserStats(publicClient, address).catch(() => null),
@@ -98,54 +69,45 @@ const StakingDashboard: React.FC<StakingDashboardProps> = ({ walletStatus }) => 
     }
   };
 
-  // Fetch the token price (hard-coded here for BRAIDS = 1,000.00)
   useEffect(() => {
-    const fetchPrice = async () => {
-      // Replace with your actual API endpoint if needed:
-      // const response = await fetch('https://api.example.com/braids-price');
-      // const data = await response.json();
-      // setTokenPrice(data.price);
-      setTokenPrice(1000.00);
-    };
-    fetchPrice();
+    setTokenPrice(1000.00);
   }, []);
 
-  // Set up polling to fetch data every 30 seconds
   useEffect(() => {
     let isMounted = true;
     let intervalId: number | undefined;
+    
     const fetchDataSafely = async () => {
       if (!isMounted) return;
       await fetchData();
     };
+
     if (isConnected && address) {
       fetchDataSafely();
-      intervalId = window.setInterval(() => {
-        if (isMounted) {
-          fetchDataSafely();
-        }
-      }, 30000);
+      intervalId = window.setInterval(fetchDataSafely, 30000);
     }
     return () => {
       isMounted = false;
-      if (intervalId !== undefined) {
-        window.clearInterval(intervalId);
-      }
+      intervalId !== undefined && window.clearInterval(intervalId);
     };
   }, [isConnected, address]);
 
-  // Handlers for staking, unstaking, claiming, and restaking
   const handleStake = async () => {
     if (!stakeAmount) return;
     try {
       setTransactionInProgress(true);
       const parsedAmount = parseEther(stakeAmount);
-      const tx = await stake({ args: [parsedAmount] });
-      await publicClient.waitForTransactionReceipt({ hash: tx.hash });
+      const hash = await writeContractAsync({
+        address: STAKING_CONTRACT_ADDRESS,
+        abi: STAKING_ABI,
+        functionName: 'stake',
+        args: [parsedAmount],
+      });
+      await publicClient.waitForTransactionReceipt({ hash });
       await fetchData();
       setStakeAmount('');
     } catch (err) {
-      console.error('Staking failed:', err);
+      console.error('Stake failed:', err);
       setError(`Failed to stake: ${err instanceof Error ? err.message : 'Unknown error'}`);
     } finally {
       setTransactionInProgress(false);
@@ -157,8 +119,13 @@ const StakingDashboard: React.FC<StakingDashboardProps> = ({ walletStatus }) => 
     try {
       setTransactionInProgress(true);
       const parsedAmount = parseEther(unstakeAmount);
-      const tx = await withdraw({ args: [parsedAmount] });
-      await publicClient.waitForTransactionReceipt({ hash: tx.hash });
+      const hash = await writeContractAsync({
+        address: STAKING_CONTRACT_ADDRESS,
+        abi: STAKING_ABI,
+        functionName: 'withdraw',
+        args: [parsedAmount],
+      });
+      await publicClient.waitForTransactionReceipt({ hash });
       await fetchData();
       setUnstakeAmount('');
     } catch (err) {
@@ -173,8 +140,12 @@ const StakingDashboard: React.FC<StakingDashboardProps> = ({ walletStatus }) => 
     if (!userStats?.earnedRewards || userStats.earnedRewards <= 0n) return;
     try {
       setTransactionInProgress(true);
-      const tx = await getReward();
-      await publicClient.waitForTransactionReceipt({ hash: tx.hash });
+      const hash = await writeContractAsync({
+        address: STAKING_CONTRACT_ADDRESS,
+        abi: STAKING_ABI,
+        functionName: 'getReward',
+      });
+      await publicClient.waitForTransactionReceipt({ hash });
       await fetchData();
     } catch (err) {
       console.error('Claim failed:', err);
@@ -188,12 +159,21 @@ const StakingDashboard: React.FC<StakingDashboardProps> = ({ walletStatus }) => 
     if (!userStats?.earnedRewards || userStats.earnedRewards <= 0n) return;
     try {
       setTransactionInProgress(true);
-      // Claim rewards
-      const txClaim = await getReward();
-      await publicClient.waitForTransactionReceipt({ hash: txClaim.hash });
-      // Then stake the claimed rewards
-      const txStake = await stake({ args: [userStats.earnedRewards] });
-      await publicClient.waitForTransactionReceipt({ hash: txStake.hash });
+      const claimHash = await writeContractAsync({
+        address: STAKING_CONTRACT_ADDRESS,
+        abi: STAKING_ABI,
+        functionName: 'getReward',
+      });
+      await publicClient.waitForTransactionReceipt({ hash: claimHash });
+      
+      const stakeHash = await writeContractAsync({
+        address: STAKING_CONTRACT_ADDRESS,
+        abi: STAKING_ABI,
+        functionName: 'stake',
+        args: [userStats.earnedRewards],
+      });
+      await publicClient.waitForTransactionReceipt({ hash: stakeHash });
+      
       await fetchData();
     } catch (err) {
       console.error('Restake failed:', err);
@@ -202,49 +182,6 @@ const StakingDashboard: React.FC<StakingDashboardProps> = ({ walletStatus }) => 
       setTransactionInProgress(false);
     }
   };
-
-  // Basic checks for wallet and network connection
-  if (!walletStatus.isInstalled) {
-    return (
-      <div className="text-center py-20">
-        <Wallet className="h-16 w-16 mx-auto text-gray-400 mb-4" />
-        <h2 className="text-2xl font-semibold mb-2">Ronin Wallet Required</h2>
-        <p className="text-gray-400 mb-4">
-          Please install Ronin Wallet to access staking
-        </p>
-        <a
-          href="https://wallet.roninchain.com/"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="inline-flex items-center px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg transition-colors"
-        >
-          Install Ronin Wallet
-        </a>
-      </div>
-    );
-  }
-
-  if (!isConnected) {
-    return (
-      <div className="text-center py-20">
-        <Wallet className="h-16 w-16 mx-auto text-gray-400 mb-4" />
-        <h2 className="text-2xl font-semibold mb-2">Connect Your Wallet</h2>
-        <p className="text-gray-400">
-          Please connect your wallet to access staking
-        </p>
-      </div>
-    );
-  }
-
-  if (!publicClient) {
-    return (
-      <div className="text-center py-20">
-        <Wallet className="h-16 w-16 mx-auto text-gray-400 mb-4" />
-        <h2 className="text-2xl font-semibold mb-2">Network Error</h2>
-        <p className="text-gray-400">Please check your wallet connection</p>
-      </div>
-    );
-  }
 
   return (
     <div className="space-y-6">
