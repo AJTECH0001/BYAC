@@ -12,22 +12,21 @@ const Modal: React.FC<ModalProps> = ({ title, isOpen, onClose, children }) => {
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
-      {/* Modal content container */}
-      <div className="relative w-full max-w-md bg-gray-800 border border-gray-700 rounded-lg p-6">
-        {/* Close button */}
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 backdrop-blur-sm">
+      <div className="relative w-full max-w-md bg-gray-800 border border-gray-700 rounded-lg p-6 mx-4">
         <button
           onClick={onClose}
-          className="absolute top-3 right-3 text-gray-400 hover:text-gray-200"
+          className="absolute top-3 right-3 text-gray-400 hover:text-gray-200 transition-colors"
+          aria-label="Close modal"
         >
           <X size={20} />
         </button>
 
-        {/* Title */}
         <h2 className="text-xl font-semibold mb-4">{title}</h2>
-
-        {/* Body */}
-        {children}
+        
+        <div className="space-y-4">
+          {children}
+        </div>
       </div>
     </div>
   );

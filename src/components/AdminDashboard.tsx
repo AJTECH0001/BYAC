@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback   } from 'react';
 import { useAccount, usePublicClient, useContractWrite, useWaitForTransactionReceipt } from 'wagmi';
 import { parseEther, formatEther } from 'viem';
 import { Shield, Pause, Play, Coins, Settings, AlertCircle, Check, Loader2 } from 'lucide-react';
@@ -114,40 +114,47 @@ const AdminDashboard: React.FC = () => {
     }
   });
 
-  const fetchData = async () => {
-    if (!address || !publicClient) return;
-  
-    try {
-      setLoading(true);
-      setError(null);
-  
-      // Add network validation
-      const chainId = await publicClient.getChainId();
-      if (chainId !== 2020) { // Ronin mainnet chain ID
-        throw new Error('Please connect to Ronin mainnet');
-      }
-  
-      const [newStakingStats, adminRole, maintainerRole, depositorRole] = await Promise.all([
-        getStakingStats(publicClient),
-        checkRole(publicClient, address, 'ADMIN'),
-        checkRole(publicClient, address, 'MAINTAINER'),
-        checkRole(publicClient, address, 'DEPOSITOR')
-      ]);
-  
-      setStakingStats(newStakingStats);
-      setRoles({
-        isAdmin: adminRole,
-        isMaintainer: maintainerRole,
-        isDepositor: depositorRole
-      });
-    } catch (err: any) {
-      console.error('Error fetching admin data:', err);
-      setError(`Failed to load admin data: ${err.message || 'Unknown error'}`);
-    } finally {
-      setLoading(false);
-    }
-  };
+ 
+ const fetchData = useCallback(async () => {
+  if (!address || !publicClient) return;
 
+  try {
+    setLoading(true);
+    setError(null);
+
+    const chainId = await publicClient.getChainId();
+    if (chainId !== 2020) {
+      throw new Error('Please connect to Ronin mainnet');
+    }
+
+    const [newStakingStats, adminRole, maintainerRole, depositorRole] = await Promise.all([
+      getStakingStats(publicClient),
+      checkRole(publicClient, address, 'ADMIN'),
+      checkRole(publicClient, address, 'MAINTAINER'),
+      checkRole(publicClient, address, 'DEPOSITOR')
+    ]);
+
+    setStakingStats(newStakingStats);
+    setRoles({
+      isAdmin: adminRole,
+      isMaintainer: maintainerRole,
+      isDepositor: depositorRole
+    });
+  } catch (err: any) {
+    console.error('Error fetching admin data:', err);
+    setError(`Failed to load admin data: ${err.message || 'Unknown error'}`);
+  } finally {
+    setLoading(false);
+  }
+}, [address, publicClient]);  // Proper dependencies
+
+useEffect(() => {
+  if (isConnected && address) {
+    fetchData();
+    const interval = setInterval(fetchData, 5000);
+    return () => clearInterval(interval);
+  }
+}, [isConnected, address, fetchData]);  
   const handleTransaction = async (
     action: () => Promise<{ hash: `0x${string}` }>,
     type: 'reward' | 'pause' | 'deposit'
@@ -187,15 +194,16 @@ const AdminDashboard: React.FC = () => {
     }
   };
 
-  useEffect(() => {
-    if (isConnected && address) {
-      fetchData();
-
-      // Set up polling
-      const interval = setInterval(fetchData, 30000);
-      return () => clearInterval(interval);
-    }
-  }, [isConnected, address, publicClient]); // Added publicClient to dependency array
+  // Reduce polling interval from 30s to 5s for more real-time updates
+useEffect(() => {
+  if (isConnected && address) {
+    fetchData();  // Initial fetch
+    
+    // Set up more frequent polling
+    const interval = setInterval(fetchData, 5000);
+    return () => clearInterval(interval);
+  }
+}, [isConnected, address, publicClient, fetchData]);  
 
   const setErrorState = (type: 'reward' | 'deposit', message: string) => {
     if (type === 'reward') setRewardInputError(message);
@@ -297,9 +305,18 @@ const AdminDashboard: React.FC = () => {
   if (!roles.isAdmin && !roles.isMaintainer && !roles.isDepositor) {
     return (
       <div className="text-center py-20">
-        <Shield className="h-16 w-16 mx-auto text-red-400 mb-4" />
-        <h2 className="text-2xl font-semibold mb-2">Access Denied</h2>
-        <p className="text-gray-400">You don't have permission to access admin features</p>
+        {loading ? (
+          <>
+            <Loader2 className="h-16 w-16 mx-auto text-purple-500 animate-spin mb-4" />
+            <h2 className="text-2xl font-semibold mb-2">Checking Permissions</h2>
+          </>
+        ) : (
+          <>
+            <Shield className="h-16 w-16 mx-auto text-red-400 mb-4" />
+            <h2 className="text-2xl font-semibold mb-2">Access Denied</h2>
+            <p className="text-gray-400">You don't have permission to access admin features</p>
+          </>
+        )}
       </div>
     );
   }
