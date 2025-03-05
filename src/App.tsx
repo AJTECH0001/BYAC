@@ -220,8 +220,6 @@ const App = () => {
     }
   };
 
-  
-
   return (
     <WagmiProvider config={config}>
       <QueryClientProvider client={queryClient}>
@@ -313,13 +311,13 @@ const App = () => {
           </nav>
 
           <main className="container mx-auto px-4 py-8">
-  {loading && <div>Checking wallet connection...</div>}
-  {errorMessage && <div className="error-message">{errorMessage}</div>}
-  {currentPage === "home" && <HomePage />}
-  {currentPage === "staking" && <StakingDashboard walletStatus={walletStatus} />}
-  {currentPage === "delegators" && <DelegatorDashboard />}
-  {currentPage === "admin" && <AdminDashboard />}
-</main>
+            {loading && <div>Checking wallet connection...</div>}
+            {errorMessage && <div className="error-message">{errorMessage}</div>}
+            {currentPage === "home" && <HomePage />}
+            {currentPage === "staking" && <StakingDashboard walletStatus={walletStatus} />}
+            {currentPage === "delegators" && <DelegatorDashboard />}
+            {currentPage === "admin" && <AdminDashboard />}
+          </main>
         </div>
       </QueryClientProvider>
     </WagmiProvider>

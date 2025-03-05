@@ -129,6 +129,34 @@ export const STAKING_ABI = [
   }
 ] as const;
 
+
+export const BRAIDS_TOKEN_ABI = [
+  {
+    "constant": true,
+    "inputs": [
+      {"name": "owner", "type": "address"},
+      {"name": "spender", "type": "address"}
+    ],
+    "name": "allowance",
+    "outputs": [{"name": "", "type": "uint256"}],
+    "payable": false,
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "constant": false,
+    "inputs": [
+      {"name": "spender", "type": "address"},
+      {"name": "amount", "type": "uint256"}
+    ],
+    "name": "approve",
+    "outputs": [{"name": "", "type": "bool"}],
+    "payable": false,
+    "stateMutability": "nonpayable",
+    "type": "function"
+  }
+]as const;
+
 export interface StakingStats {
   totalStaked: bigint;
   rewardRate: bigint;
@@ -147,15 +175,19 @@ export interface UserStats {
  * Helper to safely read contract values.
  * Accepts a function returning a Promise<T> and a fallback value in case of error.
  */
+// Update safeRead function with common revert parsing
 const safeRead = async <T>(fn: () => Promise<T>, fallback: T): Promise<T> => {
   try {
     return await fn();
   } catch (error) {
-    if (error instanceof Error && error.message.includes("Wallet connection failed")) {
-      console.warn("Wallet connection failed during contract read, returning fallback value.");
-    } else {
-      console.error("Contract read error:", error);
+    const err = error as Error;
+    const revertReason = err.message.match(/reverted with reason string '(.*?)'/);
+    
+    if (revertReason) {
+      console.warn(`Contract reverted: ${revertReason[1]}`);
+      setError(`Contract error: ${revertReason[1]}`);
     }
+    
     return fallback;
   }
 };

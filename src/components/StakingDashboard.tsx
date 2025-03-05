@@ -6,7 +6,7 @@ import {
   STAKING_CONTRACT_ADDRESS,
   STAKING_ABI,
   getStakingStats,
-  getUserStats,
+  getUserStats, BRAIDS_TOKEN_ABI
 } from '../contracts/StakingContract';
 import { BRAIDS_TOKEN_ADDRESS } from '../utils/alchemy';
 import Modal from './Modal';
@@ -34,6 +34,7 @@ const StakingDashboard: React.FC<StakingDashboardProps> = ({ walletStatus }) => 
   const [isUnstakeModalOpen, setIsUnstakeModalOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [transactionInProgress, setTransactionInProgress] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
   const [tokenPrice, setTokenPrice] = useState(1000.00);
   const [circulatingSupply, setCirculatingSupply] = useState(159_155_561n);
 
@@ -53,6 +54,7 @@ const StakingDashboard: React.FC<StakingDashboardProps> = ({ walletStatus }) => 
   const fetchData = async () => {
     if (!address || !publicClient) return;
     try {
+      setIsLoading(true);
       setError(null);
       const chainId = await publicClient.getChainId();
       if (chainId !== 2020) throw new Error('Please connect to Ronin Mainnet');
@@ -61,11 +63,18 @@ const StakingDashboard: React.FC<StakingDashboardProps> = ({ walletStatus }) => 
         getStakingStats(publicClient).catch(() => null),
         getUserStats(publicClient, address).catch(() => null),
       ]);
-      setStakingStats(newStakingStats);
-      setUserStats(newUserStats);
+
+      if (newStakingStats && newUserStats) {
+        setStakingStats(newStakingStats);
+        setUserStats(newUserStats);
+      } else {
+        throw new Error('Failed to fetch staking data');
+      }
     } catch (err) {
       console.error('Error fetching data:', err);
       setError(err instanceof Error ? err.message : 'Failed to load data');
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -97,18 +106,70 @@ const StakingDashboard: React.FC<StakingDashboardProps> = ({ walletStatus }) => 
     try {
       setTransactionInProgress(true);
       const parsedAmount = parseEther(stakeAmount);
+      
+      if (parsedAmount <= 0n) throw new Error('Amount must be greater than 0');
+      if (parsedAmount > parseEther('1000000')) {
+        throw new Error('Amount exceeds maximum stake limit of 1,000,000 BRAIDS');
+      }
+      if (braidsBalance && parsedAmount > braidsBalance.value) {
+        throw new Error('Insufficient BRAIDS balance');
+      }
+  
+      // Check and approve token allowance
+      const currentAllowance = await publicClient.readContract({
+        address: BRAIDS_TOKEN_ADDRESS,
+        abi: BRAIDS_TOKEN_ABI,
+        functionName: 'allowance',
+        args: [address, STAKING_CONTRACT_ADDRESS]
+      });
+  
+      if (currentAllowance < parsedAmount) {
+        const approveHash = await writeContractAsync({
+          address: BRAIDS_TOKEN_ADDRESS,
+          abi: BRAIDS_TOKEN_ABI,
+          functionName: 'approve',
+          args: [STAKING_CONTRACT_ADDRESS, parsedAmount],
+          gas: 100000n
+        });
+        await publicClient.waitForTransactionReceipt({ hash: approveHash });
+        console.log('Approval successful:', approveHash);
+      }
+  
+      // Estimate gas
+      const gasEstimate = await publicClient.estimateContractGas({
+        address: STAKING_CONTRACT_ADDRESS,
+        abi: STAKING_ABI,
+        functionName: 'stake',
+        args: [parsedAmount],
+        account: address
+      });
+  
+      // Execute stake transaction
       const hash = await writeContractAsync({
         address: STAKING_CONTRACT_ADDRESS,
         abi: STAKING_ABI,
         functionName: 'stake',
         args: [parsedAmount],
+        gas: gasEstimate ? gasEstimate + 10000n : 300000n
       });
+      
       await publicClient.waitForTransactionReceipt({ hash });
       await fetchData();
       setStakeAmount('');
     } catch (err) {
       console.error('Stake failed:', err);
-      setError(`Failed to stake: ${err instanceof Error ? err.message : 'Unknown error'}`);
+      let errorMessage = 'Transaction failed! Contract Interaction with RON failed';
+      if (err && err.revert) {
+        errorMessage += `: ${err.revert.reason || err.revert.data || 'Unknown reason'}`;
+        if (err.revert.reason && err.revert.reason.includes('Panic')) {
+          errorMessage += ' - There was an arithmetic overflow in the contract. Please try a smaller amount or check the contract for issues.'
+        } else if (err.revert.reason && err.revert.reason.includes('paused')) {
+          errorMessage += ' - Staking is paused. Please try again later.'
+        }
+      } else if (err.message) {
+        errorMessage += `: ${err.message}`
+      }
+      setError(errorMessage);
     } finally {
       setTransactionInProgress(false);
     }
@@ -119,12 +180,20 @@ const StakingDashboard: React.FC<StakingDashboardProps> = ({ walletStatus }) => 
     try {
       setTransactionInProgress(true);
       const parsedAmount = parseEther(unstakeAmount);
+      
+      if (parsedAmount <= 0n) throw new Error('Amount must be greater than 0');
+      if (userStats?.stakedAmount && parsedAmount > userStats.stakedAmount) {
+        throw new Error('Insufficient staked amount');
+      }
+
       const hash = await writeContractAsync({
         address: STAKING_CONTRACT_ADDRESS,
         abi: STAKING_ABI,
         functionName: 'withdraw',
         args: [parsedAmount],
+        gas: 300000n
       });
+      
       await publicClient.waitForTransactionReceipt({ hash });
       await fetchData();
       setUnstakeAmount('');
@@ -144,6 +213,7 @@ const StakingDashboard: React.FC<StakingDashboardProps> = ({ walletStatus }) => 
         address: STAKING_CONTRACT_ADDRESS,
         abi: STAKING_ABI,
         functionName: 'getReward',
+        gas: 300000n
       });
       await publicClient.waitForTransactionReceipt({ hash });
       await fetchData();
@@ -163,6 +233,7 @@ const StakingDashboard: React.FC<StakingDashboardProps> = ({ walletStatus }) => 
         address: STAKING_CONTRACT_ADDRESS,
         abi: STAKING_ABI,
         functionName: 'getReward',
+        gas: 300000n
       });
       await publicClient.waitForTransactionReceipt({ hash: claimHash });
       
@@ -171,6 +242,7 @@ const StakingDashboard: React.FC<StakingDashboardProps> = ({ walletStatus }) => 
         abi: STAKING_ABI,
         functionName: 'stake',
         args: [userStats.earnedRewards],
+        gas: 300000n
       });
       await publicClient.waitForTransactionReceipt({ hash: stakeHash });
       
@@ -183,9 +255,17 @@ const StakingDashboard: React.FC<StakingDashboardProps> = ({ walletStatus }) => 
     }
   };
 
+  const checkStakeAvailability = () => {
+    if (!braidsBalance || braidsBalance.value <= 0n) {
+      setError('No BRAIDS available to stake');
+      return false;
+    }
+    setIsStakeModalOpen(true);
+    return true;
+  };
+
   return (
     <div className="space-y-6">
-      {/* Error Banner */}
       {error && (
         <div className="bg-red-500/10 border border-red-500/20 rounded-lg p-4 flex items-center space-x-3">
           <div className="flex-1 text-red-400">{error}</div>
@@ -198,9 +278,7 @@ const StakingDashboard: React.FC<StakingDashboardProps> = ({ walletStatus }) => 
         </div>
       )}
 
-      {/* Header / Global Stats */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        {/* BRAIDS Price */}
         <div className="bg-gray-800/50 p-4 rounded-lg border border-gray-700">
           <div className="flex items-center justify-between">
             <span className="text-sm text-gray-400">BRAIDS PRICE</span>
@@ -209,7 +287,6 @@ const StakingDashboard: React.FC<StakingDashboardProps> = ({ walletStatus }) => 
           <div className="text-sm text-red-400 mt-1">-13.32%</div>
         </div>
 
-        {/* Daily Rewards */}
         <div className="bg-gray-800/50 p-4 rounded-lg border border-gray-700">
           <div className="flex items-center justify-between mb-2">
             <span className="text-sm text-gray-400">DAILY REWARDS</span>
@@ -225,7 +302,6 @@ const StakingDashboard: React.FC<StakingDashboardProps> = ({ walletStatus }) => 
           </div>
         </div>
 
-        {/* Circulating Supply */}
         <div className="bg-gray-800/50 p-4 rounded-lg border border-gray-700">
           <div className="flex items-center justify-between mb-2">
             <span className="text-sm text-gray-400">CIRCULATING SUPPLY</span>
@@ -237,11 +313,8 @@ const StakingDashboard: React.FC<StakingDashboardProps> = ({ walletStatus }) => 
         </div>
       </div>
 
-      {/* Main Panel */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        {/* Left: My Staking */}
         <div className="bg-gray-800/50 p-6 rounded-lg border border-gray-700 space-y-4">
-          {/* Header row: Title and Hide Numbers button */}
           <div className="flex items-center justify-between mb-2">
             <h3 className="text-xl font-semibold">My BRAIDS Staking</h3>
             <button
@@ -262,7 +335,6 @@ const StakingDashboard: React.FC<StakingDashboardProps> = ({ walletStatus }) => 
             </button>
           </div>
 
-          {/* Claimable Rewards + Buttons */}
           <div className="flex items-center justify-between mb-4">
             <div className="text-sm">
               <span className="text-gray-400">CLAIMABLE REWARDS: </span>
@@ -281,7 +353,8 @@ const StakingDashboard: React.FC<StakingDashboardProps> = ({ walletStatus }) => 
                 disabled={
                   !userStats?.earnedRewards ||
                   userStats.earnedRewards <= 0n ||
-                  transactionInProgress
+                  transactionInProgress ||
+                  isLoading
                 }
                 className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded transition-colors disabled:bg-gray-600"
               >
@@ -292,7 +365,8 @@ const StakingDashboard: React.FC<StakingDashboardProps> = ({ walletStatus }) => 
                 disabled={
                   !userStats?.earnedRewards ||
                   userStats.earnedRewards <= 0n ||
-                  transactionInProgress
+                  transactionInProgress ||
+                  isLoading
                 }
                 className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded transition-colors disabled:bg-gray-600"
               >
@@ -301,7 +375,6 @@ const StakingDashboard: React.FC<StakingDashboardProps> = ({ walletStatus }) => 
             </div>
           </div>
 
-          {/* My Staked / Available */}
           <div className="grid grid-cols-2 gap-4">
             <div>
               <span className="text-sm text-gray-400 block">TOTAL STAKED</span>
@@ -327,26 +400,24 @@ const StakingDashboard: React.FC<StakingDashboardProps> = ({ walletStatus }) => 
             </div>
           </div>
 
-          {/* Stake & Unstake Buttons */}
           <div className="space-y-4">
             <button
-              onClick={() => setIsStakeModalOpen(true)}
-              disabled={transactionInProgress || stakingStats?.isPaused}
+              onClick={checkStakeAvailability}
+              disabled={transactionInProgress || stakingStats?.isPaused || isLoading}
               className="w-full bg-purple-600 hover:bg-purple-700 text-white py-2 rounded disabled:bg-gray-600"
             >
-              Stake
+              {isLoading ? 'Loading...' : 'Stake'}
             </button>
             <button
               onClick={() => setIsUnstakeModalOpen(true)}
-              disabled={transactionInProgress}
+              disabled={transactionInProgress || isLoading}
               className="w-full bg-red-600 hover:bg-red-700 text-white py-2 rounded disabled:bg-gray-600"
             >
-              Unstake
+              {isLoading ? 'Loading...' : 'Unstake'}
             </button>
           </div>
         </div>
 
-        {/* Right: Total Staked & Estimated Rewards */}
         <div className="bg-gray-800/50 p-6 rounded-lg border border-gray-700 flex flex-col justify-between">
           <div className="space-y-3">
             <h3 className="text-xl font-semibold mb-2">Total Staked</h3>
@@ -366,7 +437,6 @@ const StakingDashboard: React.FC<StakingDashboardProps> = ({ walletStatus }) => 
               </div>
             )}
 
-            {/* Estimated APR */}
             <div className="mt-4">
               <h3 className="text-xl font-semibold mb-2">Estimated Rewards</h3>
               <span className="text-2xl font-semibold">
@@ -378,7 +448,6 @@ const StakingDashboard: React.FC<StakingDashboardProps> = ({ walletStatus }) => 
         </div>
       </div>
 
-      {/* ======== Stake Modal ======== */}
       <Modal
         title="Stake BRAIDS"
         isOpen={isStakeModalOpen}
@@ -397,7 +466,7 @@ const StakingDashboard: React.FC<StakingDashboardProps> = ({ walletStatus }) => 
             }}
             placeholder="0.00"
             className="flex-1 bg-gray-700 border border-gray-600 rounded-lg px-4 py-2 focus:outline-none"
-            disabled={transactionInProgress}
+            disabled={transactionInProgress || isLoading}
           />
           <button
             onClick={() => {
@@ -406,7 +475,7 @@ const StakingDashboard: React.FC<StakingDashboardProps> = ({ walletStatus }) => 
               }
             }}
             className="px-3 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg disabled:bg-gray-600"
-            disabled={transactionInProgress || !braidsBalance}
+            disabled={transactionInProgress || !braidsBalance || isLoading}
           >
             MAX
           </button>
@@ -414,16 +483,15 @@ const StakingDashboard: React.FC<StakingDashboardProps> = ({ walletStatus }) => 
         <button
           onClick={async () => {
             await handleStake();
-            setIsStakeModalOpen(false); // Close modal after confirming
+            setIsStakeModalOpen(false);
           }}
-          disabled={!stakeAmount || transactionInProgress || stakingStats?.isPaused}
+          disabled={!stakeAmount || transactionInProgress || stakingStats?.isPaused || isLoading}
           className="mt-2 w-full bg-purple-600 hover:bg-purple-700 text-white py-2 rounded disabled:bg-gray-600"
         >
           {transactionInProgress ? 'Staking...' : 'Confirm Stake'}
         </button>
       </Modal>
 
-      {/* ======== Unstake Modal ======== */}
       <Modal
         title="Unstake BRAIDS"
         isOpen={isUnstakeModalOpen}
@@ -442,7 +510,7 @@ const StakingDashboard: React.FC<StakingDashboardProps> = ({ walletStatus }) => 
             }}
             placeholder="0.00"
             className="flex-1 bg-gray-700 border border-gray-600 rounded-lg px-4 py-2 focus:outline-none"
-            disabled={transactionInProgress}
+            disabled={transactionInProgress || isLoading}
           />
           <button
             onClick={() => {
@@ -454,7 +522,8 @@ const StakingDashboard: React.FC<StakingDashboardProps> = ({ walletStatus }) => 
             disabled={
               transactionInProgress ||
               !userStats?.stakedAmount ||
-              userStats.stakedAmount <= 0n
+              userStats.stakedAmount <= 0n ||
+              isLoading
             }
           >
             MAX
@@ -463,9 +532,9 @@ const StakingDashboard: React.FC<StakingDashboardProps> = ({ walletStatus }) => 
         <button
           onClick={async () => {
             await handleUnstake();
-            setIsUnstakeModalOpen(false); // Close modal after confirming
+            setIsUnstakeModalOpen(false);
           }}
-          disabled={!unstakeAmount || transactionInProgress}
+          disabled={!unstakeAmount || transactionInProgress || isLoading}
           className="mt-2 w-full bg-red-600 hover:bg-red-700 text-white py-2 rounded disabled:bg-gray-600"
         >
           {transactionInProgress ? 'Unstaking...' : 'Confirm Unstake'}

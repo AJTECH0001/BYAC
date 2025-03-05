@@ -1,226 +1,261 @@
-import React, { useState, useEffect, useCallback   } from 'react';
-import { useAccount, usePublicClient, useContractWrite, useWaitForTransactionReceipt } from 'wagmi';
-import { parseEther, formatEther } from 'viem';
-import { Shield, Pause, Play, Coins, Settings, AlertCircle, Check, Loader2 } from 'lucide-react';
-import { STAKING_CONTRACT_ADDRESS, STAKING_ABI, getStakingStats, checkRole,  StakingStats } from '../contracts/StakingContract';
+import React, { useState, useEffect, useCallback } from "react";
+import {
+  useAccount,
+  usePublicClient,
+  useContractWrite,
+  useWaitForTransactionReceipt,
+} from "wagmi";
+import { parseEther, formatEther } from "viem";
+import {
+  Shield,
+  Pause,
+  Play,
+  Coins,
+  Settings,
+  AlertCircle,
+  Check,
+  Loader2,
+} from "lucide-react";
+import {
+  STAKING_CONTRACT_ADDRESS,
+  STAKING_ABI,
+  getStakingStats,
+  checkRole,
+  StakingStats,
+} from "../contracts/StakingContract";
 
 // Define transaction status type
-type TransactionStatus = 'idle' | 'preparing' | 'pending' | 'success' | 'error';
+type TransactionStatus = "idle" | "preparing" | "pending" | "success" | "error";
 
 // Validation constants - adjust these based on your contract specifics
-const MAX_REWARD_AMOUNT = '1000000'; // Example max reward amount
-const MIN_REWARD_AMOUNT = '0.000001'; // Example min reward amount
+const MAX_REWARD_AMOUNT = "1000000"; // Example max reward amount
+const MIN_REWARD_AMOUNT = "0.000001"; // Example min reward amount
 
 const AdminDashboard: React.FC = () => {
   const { address, isConnected } = useAccount();
   const publicClient = usePublicClient();
-  
+
   const [stakingStats, setStakingStats] = useState<StakingStats | null>(null);
   const [roles, setRoles] = useState({
     isAdmin: false,
     isMaintainer: false,
-    isDepositor: false
+    isDepositor: false,
   });
-  const [rewardAmount, setRewardAmount] = useState('');
-  const [depositAmount, setDepositAmount] = useState('');
+  const [rewardAmount, setRewardAmount] = useState("");
+  const [depositAmount, setDepositAmount] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  
+
   // Transaction statuses
-  const [rewardTxStatus, setRewardTxStatus] = useState<TransactionStatus>('idle');
-  const [pauseTxStatus, setPauseTxStatus] = useState<TransactionStatus>('idle');
-  const [depositTxStatus, setDepositTxStatus] = useState<TransactionStatus>('idle');
-  
+  const [rewardTxStatus, setRewardTxStatus] =
+    useState<TransactionStatus>("idle");
+  const [pauseTxStatus, setPauseTxStatus] = useState<TransactionStatus>("idle");
+  const [depositTxStatus, setDepositTxStatus] =
+    useState<TransactionStatus>("idle");
+
   // Transaction hashes for waiting
   const [rewardTxHash, setRewardTxHash] = useState<`0x${string}` | null>(null);
   const [pauseTxHash, setPauseTxHash] = useState<`0x${string}` | null>(null);
-  const [depositTxHash, setDepositTxHash] = useState<`0x${string}` | null>(null);
+  const [depositTxHash, setDepositTxHash] = useState<`0x${string}` | null>(
+    null
+  );
 
   // Input validation states
   const [rewardInputError, setRewardInputError] = useState<string | null>(null);
-  const [depositInputError, setDepositInputError] = useState<string | null>(null);
+  const [depositInputError, setDepositInputError] = useState<string | null>(
+    null
+  );
 
   // Contract writes with configuration
   const { writeAsync: notifyReward, data: rewardData } = useContractWrite({
     address: STAKING_CONTRACT_ADDRESS,
     abi: STAKING_ABI,
-    functionName: 'notifyRewardAmount',
+    functionName: "notifyRewardAmount",
   });
 
   const { writeAsync: pause, data: pauseData } = useContractWrite({
     address: STAKING_CONTRACT_ADDRESS,
     abi: STAKING_ABI,
-    functionName: 'pause',
+    functionName: "pause",
   });
 
   const { writeAsync: unpause, data: unpauseData } = useContractWrite({
     address: STAKING_CONTRACT_ADDRESS,
     abi: STAKING_ABI,
-    functionName: 'unpause',
+    functionName: "unpause",
   });
 
   const { writeAsync: depositRewards, data: depositData } = useContractWrite({
     address: STAKING_CONTRACT_ADDRESS,
     abi: STAKING_ABI,
-    functionName: 'depositRewards',
+    functionName: "depositRewards",
   });
 
   // Transaction watchers
   useWaitForTransactionReceipt({
     hash: rewardTxHash,
     onSuccess: () => {
-      setRewardTxStatus('success');
+      setRewardTxStatus("success");
       setTimeout(() => {
-        setRewardTxStatus('idle');
+        setRewardTxStatus("idle");
         setRewardTxHash(null);
       }, 5000);
       fetchData();
     },
     onError: (error) => {
-      setRewardTxStatus('error');
+      setRewardTxStatus("error");
       setError(`Reward transaction failed: ${error.message}`);
-    }
+    },
   });
 
   useWaitForTransactionReceipt({
     hash: pauseTxHash,
     onSuccess: () => {
-      setPauseTxStatus('success');
+      setPauseTxStatus("success");
       setTimeout(() => {
-        setPauseTxStatus('idle');
+        setPauseTxStatus("idle");
         setPauseTxHash(null);
       }, 5000);
       fetchData();
     },
     onError: (error) => {
-      setPauseTxStatus('error');
-      setError(`${stakingStats?.isPaused ? 'Unpause' : 'Pause'} transaction failed: ${error.message}`);
-    }
+      setPauseTxStatus("error");
+      setError(
+        `${stakingStats?.isPaused ? "Unpause" : "Pause"} transaction failed: ${
+          error.message
+        }`
+      );
+    },
   });
 
   useWaitForTransactionReceipt({
     hash: depositTxHash,
     onSuccess: () => {
-      setDepositTxStatus('success');
+      setDepositTxStatus("success");
       setTimeout(() => {
-        setDepositTxStatus('idle');
+        setDepositTxStatus("idle");
         setDepositTxHash(null);
       }, 5000);
       fetchData();
     },
     onError: (error) => {
-      setDepositTxStatus('error');
+      setDepositTxStatus("error");
       setError(`Deposit transaction failed: ${error.message}`);
-    }
+    },
   });
 
- 
- const fetchData = useCallback(async () => {
-  if (!address || !publicClient) return;
+  const fetchData = useCallback(async () => {
+    if (!address || !publicClient) return;
 
-  try {
-    setLoading(true);
-    setError(null);
+    try {
+      setLoading(true);
+      setError(null);
 
-    const chainId = await publicClient.getChainId();
-    if (chainId !== 2020) {
-      throw new Error('Please connect to Ronin mainnet');
+      const chainId = await publicClient.getChainId();
+      if (chainId !== 2020) {
+        throw new Error("Please connect to Ronin mainnet");
+      }
+
+      const [newStakingStats, adminRole, maintainerRole, depositorRole] =
+        await Promise.all([
+          getStakingStats(publicClient),
+          checkRole(publicClient, address, "ADMIN"),
+          checkRole(publicClient, address, "MAINTAINER"),
+          checkRole(publicClient, address, "DEPOSITOR"),
+        ]);
+
+      setStakingStats(newStakingStats);
+      setRoles({
+        isAdmin: adminRole,
+        isMaintainer: maintainerRole,
+        isDepositor: depositorRole,
+      });
+    } catch (err: any) {
+      console.error("Error fetching admin data:", err);
+      setError(`Failed to load admin data: ${err.message || "Unknown error"}`);
+    } finally {
+      setLoading(false);
     }
+  }, [address, publicClient]); // Proper dependencies
 
-    const [newStakingStats, adminRole, maintainerRole, depositorRole] = await Promise.all([
-      getStakingStats(publicClient),
-      checkRole(publicClient, address, 'ADMIN'),
-      checkRole(publicClient, address, 'MAINTAINER'),
-      checkRole(publicClient, address, 'DEPOSITOR')
-    ]);
+  useEffect(() => {
+    if (isConnected && address) {
+      fetchData();
+      const interval = setInterval(fetchData, 5000);
+      return () => clearInterval(interval);
+    }
+  }, [isConnected, address, fetchData]);
 
-    setStakingStats(newStakingStats);
-    setRoles({
-      isAdmin: adminRole,
-      isMaintainer: maintainerRole,
-      isDepositor: depositorRole
-    });
-  } catch (err: any) {
-    console.error('Error fetching admin data:', err);
-    setError(`Failed to load admin data: ${err.message || 'Unknown error'}`);
-  } finally {
-    setLoading(false);
-  }
-}, [address, publicClient]);  // Proper dependencies
-
-useEffect(() => {
-  if (isConnected && address) {
-    fetchData();
-    const interval = setInterval(fetchData, 5000);
-    return () => clearInterval(interval);
-  }
-}, [isConnected, address, fetchData]);  
   const handleTransaction = async (
     action: () => Promise<{ hash: `0x${string}` }>,
-    type: 'reward' | 'pause' | 'deposit'
+    type: "reward" | "pause" | "deposit"
   ) => {
     const statusSetters = {
       reward: setRewardTxStatus,
       pause: setPauseTxStatus,
-      deposit: setDepositTxStatus
+      deposit: setDepositTxStatus,
     };
-    
+
     const hashSetters = {
       reward: setRewardTxHash,
       pause: setPauseTxHash,
-      deposit: setDepositTxHash
+      deposit: setDepositTxHash,
     };
 
     try {
-      statusSetters[type]('preparing');
+      statusSetters[type]("preparing");
       setError(null);
       const tx = await action();
       hashSetters[type](tx.hash);
-      statusSetters[type]('pending');
+      statusSetters[type]("pending");
     } catch (err: any) {
-      statusSetters[type]('error');
+      statusSetters[type]("error");
       handleTransactionError(err);
     }
   };
 
   const handleTransactionError = (error: any) => {
-    console.error('Transaction error:', error);
+    console.error("Transaction error:", error);
     if (error.code === 4001) {
-      setError('User rejected transaction');
-    } else if (error.message?.includes('insufficient funds')) {
-      setError('Insufficient funds for transaction');
+      setError("User rejected transaction");
+    } else if (error.message?.includes("insufficient funds")) {
+      setError("Insufficient funds for transaction");
     } else {
-      setError(error.shortMessage || error.message || 'Transaction failed');
+      setError(error.shortMessage || error.message || "Transaction failed");
     }
   };
 
   // Reduce polling interval from 30s to 5s for more real-time updates
-useEffect(() => {
-  if (isConnected && address) {
-    fetchData();  // Initial fetch
-    
-    // Set up more frequent polling
-    const interval = setInterval(fetchData, 5000);
-    return () => clearInterval(interval);
-  }
-}, [isConnected, address, publicClient, fetchData]);  
+  useEffect(() => {
+    if (isConnected && address) {
+      fetchData(); // Initial fetch
 
-  const setErrorState = (type: 'reward' | 'deposit', message: string) => {
-    if (type === 'reward') setRewardInputError(message);
+      // Set up more frequent polling
+      const interval = setInterval(fetchData, 5000);
+      return () => clearInterval(interval);
+    }
+  }, [isConnected, address, publicClient, fetchData]);
+
+  const setErrorState = (type: "reward" | "deposit", message: string) => {
+    if (type === "reward") setRewardInputError(message);
     else setDepositInputError(message);
     return false;
   };
 
   // Validate reward amount input
   const validateRewardAmount = (amount: string): boolean => {
-    if (!amount) return setErrorState('reward', 'Amount is required');
-    
+    if (!amount) return setErrorState("reward", "Amount is required");
+
     const numAmount = parseFloat(amount);
-    if (isNaN(numAmount)) return setErrorState('reward', 'Invalid number format');
-    if (numAmount <= 0) return setErrorState('reward', 'Must be greater than 0');
-    if (numAmount < parseFloat(MIN_REWARD_AMOUNT)) return setErrorState('reward', `Minimum ${MIN_REWARD_AMOUNT}`);
-    if (numAmount > parseFloat(MAX_REWARD_AMOUNT)) return setErrorState('reward', `Maximum ${MAX_REWARD_AMOUNT}`);
-    
+    if (isNaN(numAmount))
+      return setErrorState("reward", "Invalid number format");
+    if (numAmount <= 0)
+      return setErrorState("reward", "Must be greater than 0");
+    if (numAmount < parseFloat(MIN_REWARD_AMOUNT))
+      return setErrorState("reward", `Minimum ${MIN_REWARD_AMOUNT}`);
+    if (numAmount > parseFloat(MAX_REWARD_AMOUNT))
+      return setErrorState("reward", `Maximum ${MAX_REWARD_AMOUNT}`);
+
     setRewardInputError(null);
     return true;
   };
@@ -228,18 +263,18 @@ useEffect(() => {
   // Validate deposit amount input
   const validateDepositAmount = (amount: string): boolean => {
     if (!amount) {
-      setDepositInputError('Amount is required');
+      setDepositInputError("Amount is required");
       return false;
     }
 
     const numAmount = parseFloat(amount);
     if (isNaN(numAmount)) {
-      setDepositInputError('Invalid number');
+      setDepositInputError("Invalid number");
       return false;
     }
 
     if (numAmount <= 0) {
-      setDepositInputError('Amount must be greater than zero');
+      setDepositInputError("Amount must be greater than zero");
       return false;
     }
 
@@ -248,44 +283,52 @@ useEffect(() => {
   };
 
   const handleSetRewards = async () => {
-    if (!validateRewardAmount(rewardAmount) || rewardTxStatus !== 'idle') return;
+    if (!validateRewardAmount(rewardAmount) || rewardTxStatus !== "idle")
+      return;
     await handleTransaction(
       () => notifyReward({ args: [parseEther(rewardAmount)] }),
-      'reward'
+      "reward"
     );
-    setRewardAmount('');
+    setRewardAmount("");
   };
-  
+
   const handlePauseToggle = async () => {
-    if (pauseTxStatus !== 'idle') return;
+    if (pauseTxStatus !== "idle") return;
     const action = stakingStats?.isPaused ? unpause : pause;
-    await handleTransaction(action, 'pause');
+    await handleTransaction(action, "pause");
   };
-  
+
   const handleDepositRewards = async () => {
-    if (!validateDepositAmount(depositAmount) || depositTxStatus !== 'idle') return;
+    if (!validateDepositAmount(depositAmount) || depositTxStatus !== "idle")
+      return;
     await handleTransaction(
       () => depositRewards({ args: [parseEther(depositAmount)] }),
-      'deposit'
+      "deposit"
     );
-    setDepositAmount('');
+    setDepositAmount("");
   };
 
   // Helper for rendering transaction status
   const renderTxStatus = (status: TransactionStatus, actionName: string) => {
     const statusConfig = {
-      preparing: { text: 'Preparing', icon: Loader2, color: 'yellow' },
-      pending: { text: 'Processing', icon: Loader2, color: 'yellow' },
-      success: { text: 'Successful', icon: Check, color: 'green' },
-      error: { text: 'Failed', icon: AlertCircle, color: 'red' }
+      preparing: { text: "Preparing", icon: Loader2, color: "yellow" },
+      pending: { text: "Processing", icon: Loader2, color: "yellow" },
+      success: { text: "Successful", icon: Check, color: "green" },
+      error: { text: "Failed", icon: AlertCircle, color: "red" },
     };
 
     const config = statusConfig[status];
     if (!config) return null;
 
     return (
-      <span className={`text-xs text-${config.color}-400 flex items-center mt-2`}>
-        <config.icon className={`h-3 w-3 mr-1 ${status !== 'success' ? 'animate-spin' : ''}`} />
+      <span
+        className={`text-xs text-${config.color}-400 flex items-center mt-2`}
+      >
+        <config.icon
+          className={`h-3 w-3 mr-1 ${
+            status !== "success" ? "animate-spin" : ""
+          }`}
+        />
         {config.text} {actionName}
       </span>
     );
@@ -296,7 +339,9 @@ useEffect(() => {
       <div className="text-center py-20">
         <Shield className="h-16 w-16 mx-auto text-gray-400 mb-4" />
         <h2 className="text-2xl font-semibold mb-2">Connect Your Wallet</h2>
-        <p className="text-gray-400">Please connect your wallet to access admin features</p>
+        <p className="text-gray-400">
+          Please connect your wallet to access admin features
+        </p>
       </div>
     );
   }
@@ -308,13 +353,17 @@ useEffect(() => {
         {loading ? (
           <>
             <Loader2 className="h-16 w-16 mx-auto text-purple-500 animate-spin mb-4" />
-            <h2 className="text-2xl font-semibold mb-2">Checking Permissions</h2>
+            <h2 className="text-2xl font-semibold mb-2">
+              Checking Permissions
+            </h2>
           </>
         ) : (
           <>
             <Shield className="h-16 w-16 mx-auto text-red-400 mb-4" />
             <h2 className="text-2xl font-semibold mb-2">Access Denied</h2>
-            <p className="text-gray-400">You don't have permission to access admin features</p>
+            <p className="text-gray-400">
+              You don't have permission to access admin features
+            </p>
           </>
         )}
       </div>
@@ -356,7 +405,7 @@ useEffect(() => {
             )}
           </div>
           <div className="text-xl font-semibold">
-            {stakingStats?.isPaused ? 'Paused' : 'Active'}
+            {stakingStats?.isPaused ? "Paused" : "Active"}
           </div>
         </div>
 
@@ -371,7 +420,8 @@ useEffect(() => {
             <Coins className="h-5 w-5 text-yellow-400" />
           </div>
           <div className="text-xl font-semibold">
-            {stakingStats ? formatEther(stakingStats.rewardRate) : '0'} BRAIDS/block
+            {stakingStats ? formatEther(stakingStats.rewardRate) : "0"}{" "}
+            BRAIDS/block
           </div>
         </div>
 
@@ -386,7 +436,8 @@ useEffect(() => {
             <Settings className="h-5 w-5 text-purple-400" />
           </div>
           <div className="text-xl font-semibold">
-            {stakingStats ? formatEther(stakingStats.rewardForDuration) : '0'} BRAIDS
+            {stakingStats ? formatEther(stakingStats.rewardForDuration) : "0"}{" "}
+            BRAIDS
           </div>
         </div>
       </div>
@@ -407,36 +458,50 @@ useEffect(() => {
                   value={rewardAmount}
                   onChange={(e) => {
                     const value = e.target.value;
-                    if (value === '' || /^\d*\.?\d*$/.test(value)) {
+                    if (value === "" || /^\d*\.?\d*$/.test(value)) {
                       setRewardAmount(value);
                       if (value) validateRewardAmount(value);
                     }
                   }}
                   placeholder="0.00"
-                  disabled={rewardTxStatus === 'pending' || rewardTxStatus === 'preparing'}
+                  disabled={
+                    rewardTxStatus === "pending" ||
+                    rewardTxStatus === "preparing"
+                  }
                   className={`w-full bg-gray-700 border ${
-                    rewardInputError ? 'border-red-500' : 'border-gray-600'
+                    rewardInputError ? "border-red-500" : "border-gray-600"
                   } rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500 disabled:opacity-60 disabled:cursor-not-allowed`}
                 />
                 {rewardInputError && (
-                  <p className="mt-1 text-xs text-red-500">{rewardInputError}</p>
+                  <p className="mt-1 text-xs text-red-500">
+                    {rewardInputError}
+                  </p>
                 )}
               </div>
               <button
                 onClick={handleSetRewards}
-                disabled={!rewardAmount || !!rewardInputError || loading || rewardTxStatus === 'pending' || rewardTxStatus === 'preparing'}
+                disabled={
+                  !rewardAmount ||
+                  !!rewardInputError ||
+                  loading ||
+                  rewardTxStatus === "pending" ||
+                  rewardTxStatus === "preparing"
+                }
                 className="w-full bg-purple-600 hover:bg-purple-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white font-semibold py-3 rounded-lg transition-colors flex items-center justify-center"
               >
-                {rewardTxStatus === 'pending' || rewardTxStatus === 'preparing' ? (
+                {rewardTxStatus === "pending" ||
+                rewardTxStatus === "preparing" ? (
                   <>
                     <Loader2 className="h-5 w-5 mr-2 animate-spin" />
-                    {rewardTxStatus === 'preparing' ? 'Preparing...' : 'Processing...'}
+                    {rewardTxStatus === "preparing"
+                      ? "Preparing..."
+                      : "Processing..."}
                   </>
                 ) : (
-                  'Set Reward Amount'
+                  "Set Reward Amount"
                 )}
               </button>
-              {renderTxStatus(rewardTxStatus, 'Reward update')}
+              {renderTxStatus(rewardTxStatus, "Reward update")}
             </div>
           </div>
         )}
@@ -447,17 +512,23 @@ useEffect(() => {
             <h3 className="text-lg font-semibold mb-4">Contract Control</h3>
             <button
               onClick={handlePauseToggle}
-              disabled={loading || pauseTxStatus === 'pending' || pauseTxStatus === 'preparing'}
+              disabled={
+                loading ||
+                pauseTxStatus === "pending" ||
+                pauseTxStatus === "preparing"
+              }
               className={`w-full font-semibold py-3 rounded-lg transition-colors ${
                 stakingStats?.isPaused
-                  ? 'bg-green-600 hover:bg-green-700'
-                  : 'bg-red-600 hover:bg-red-700'
+                  ? "bg-green-600 hover:bg-green-700"
+                  : "bg-red-600 hover:bg-red-700"
               } disabled:bg-gray-600 disabled:cursor-not-allowed text-white flex items-center justify-center gap-2`}
             >
-              {pauseTxStatus === 'pending' || pauseTxStatus === 'preparing' ? (
+              {pauseTxStatus === "pending" || pauseTxStatus === "preparing" ? (
                 <>
                   <Loader2 className="h-5 w-5 animate-spin" />
-                  {pauseTxStatus === 'preparing' ? 'Preparing...' : 'Processing...'}
+                  {pauseTxStatus === "preparing"
+                    ? "Preparing..."
+                    : "Processing..."}
                 </>
               ) : stakingStats?.isPaused ? (
                 <>
@@ -471,7 +542,10 @@ useEffect(() => {
                 </>
               )}
             </button>
-            {renderTxStatus(pauseTxStatus, stakingStats?.isPaused ? 'Unpause' : 'Pause')}
+            {renderTxStatus(
+              pauseTxStatus,
+              stakingStats?.isPaused ? "Unpause" : "Pause"
+            )}
           </div>
         )}
 
@@ -489,36 +563,50 @@ useEffect(() => {
                   value={depositAmount}
                   onChange={(e) => {
                     const value = e.target.value;
-                    if (value === '' || /^\d*\.?\d*$/.test(value)) {
+                    if (value === "" || /^\d*\.?\d*$/.test(value)) {
                       setDepositAmount(value);
                       if (value) validateDepositAmount(value);
                     }
                   }}
                   placeholder="0.00"
-                  disabled={depositTxStatus === 'pending' || depositTxStatus === 'preparing'}
+                  disabled={
+                    depositTxStatus === "pending" ||
+                    depositTxStatus === "preparing"
+                  }
                   className={`w-full bg-gray-700 border ${
-                    depositInputError ? 'border-red-500' : 'border-gray-600'
+                    depositInputError ? "border-red-500" : "border-gray-600"
                   } rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500 disabled:opacity-60 disabled:cursor-not-allowed`}
                 />
                 {depositInputError && (
-                  <p className="mt-1 text-xs text-red-500">{depositInputError}</p>
+                  <p className="mt-1 text-xs text-red-500">
+                    {depositInputError}
+                  </p>
                 )}
               </div>
               <button
                 onClick={handleDepositRewards}
-                disabled={!depositAmount || !!depositInputError || loading || depositTxStatus === 'pending' || depositTxStatus === 'preparing'}
+                disabled={
+                  !depositAmount ||
+                  !!depositInputError ||
+                  loading ||
+                  depositTxStatus === "pending" ||
+                  depositTxStatus === "preparing"
+                }
                 className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white font-semibold py-3 rounded-lg transition-colors flex items-center justify-center"
               >
-                {depositTxStatus === 'pending' || depositTxStatus === 'preparing' ? (
+                {depositTxStatus === "pending" ||
+                depositTxStatus === "preparing" ? (
                   <>
                     <Loader2 className="h-5 w-5 mr-2 animate-spin" />
-                    {depositTxStatus === 'preparing' ? 'Preparing...' : 'Processing...'}
+                    {depositTxStatus === "preparing"
+                      ? "Preparing..."
+                      : "Processing..."}
                   </>
                 ) : (
-                  'Deposit Rewards'
+                  "Deposit Rewards"
                 )}
               </button>
-              {renderTxStatus(depositTxStatus, 'Deposit')}
+              {renderTxStatus(depositTxStatus, "Deposit")}
             </div>
           </div>
         )}
@@ -526,10 +614,12 @@ useEffect(() => {
 
       {/* Display user roles for debugging */}
       <div className="mt-8 text-sm text-gray-500">
-        <p>Your current roles: {Object.entries(roles)
-          .filter(([_, hasRole]) => hasRole)
-          .map(([role]) => role.replace('is', ''))
-          .join(', ') || 'None'}
+        <p>
+          Your current roles:{" "}
+          {Object.entries(roles)
+            .filter(([_, hasRole]) => hasRole)
+            .map(([role]) => role.replace("is", ""))
+            .join(", ") || "None"}
         </p>
       </div>
     </div>
