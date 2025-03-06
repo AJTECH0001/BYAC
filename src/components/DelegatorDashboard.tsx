@@ -40,34 +40,41 @@ const DelegatorDashboard: React.FC = () => {
     try {
       setLoading(true);
       setError(null);
-
-      // Fetch validator data
+  
       const validatorData = await getValidatorData(VALIDATOR_ADDRESS);
       if (!validatorData) {
         throw new Error('Failed to fetch validator data');
       }
-
-      // Fetch delegator list
+  
       const delegatorList = await getDelegatorsList(VALIDATOR_ADDRESS);
       if (!delegatorList) {
         throw new Error('Failed to fetch delegator list');
       }
-
-      // Sort delegators by stake
+  
       const enrichedDelegators = delegatorList
         .map((delegator, index) => ({
           ...delegator,
           rank: index + 1
         }))
         .sort((a, b) => Number(BigInt(b.stake) - BigInt(a.stake)));
-
-      setValidatorStats(validatorData);
+  
+      setValidatorStats({
+        ...validatorData,
+        totalDelegators: delegatorList.length // Update totalDelegators from actual list
+      });
       setDelegators(enrichedDelegators);
-      setError(null);
     } catch (error: any) {
       console.error('Error fetching data:', error);
-      setError('Failed to load delegator data. Please try again later.');
+      setError(error.message || 'Failed to load delegator data. Please try again later.');
       setDelegators([]);
+      setValidatorStats({
+        totalStake: '0',
+        totalDelegators: 0,
+        apr: '0',
+        commission: '0',
+        uptime: '0',
+        lastSignedBlock: '0'
+      });
     } finally {
       setLoading(false);
     }
