@@ -27,14 +27,15 @@ import {
 // Define transaction status type
 type TransactionStatus = "idle" | "preparing" | "pending" | "success" | "error";
 
-// Validation constants - adjust these based on your contract specifics
-const MAX_REWARD_AMOUNT = "1000000"; // Example max reward amount
-const MIN_REWARD_AMOUNT = "0.000001"; // Example min reward amount
+// Validation constants
+const MAX_REWARD_AMOUNT = "1000000";
+const MIN_REWARD_AMOUNT = "0.000001";
 
 const AdminDashboard: React.FC = () => {
   const { address, isConnected } = useAccount();
   const publicClient = usePublicClient();
 
+  // State declarations
   const [stakingStats, setStakingStats] = useState<StakingStats | null>(null);
   const [roles, setRoles] = useState({
     isAdmin: false,
@@ -45,28 +46,16 @@ const AdminDashboard: React.FC = () => {
   const [depositAmount, setDepositAmount] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-
-  // Transaction statuses
-  const [rewardTxStatus, setRewardTxStatus] =
-    useState<TransactionStatus>("idle");
+  const [rewardTxStatus, setRewardTxStatus] = useState<TransactionStatus>("idle");
   const [pauseTxStatus, setPauseTxStatus] = useState<TransactionStatus>("idle");
-  const [depositTxStatus, setDepositTxStatus] =
-    useState<TransactionStatus>("idle");
-
-  // Transaction hashes for waiting
+  const [depositTxStatus, setDepositTxStatus] = useState<TransactionStatus>("idle");
   const [rewardTxHash, setRewardTxHash] = useState<`0x${string}` | null>(null);
   const [pauseTxHash, setPauseTxHash] = useState<`0x${string}` | null>(null);
-  const [depositTxHash, setDepositTxHash] = useState<`0x${string}` | null>(
-    null
-  );
-
-  // Input validation states
+  const [depositTxHash, setDepositTxHash] = useState<`0x${string}` | null>(null);
   const [rewardInputError, setRewardInputError] = useState<string | null>(null);
-  const [depositInputError, setDepositInputError] = useState<string | null>(
-    null
-  );
+  const [depositInputError, setDepositInputError] = useState<string | null>(null);
 
-  // Contract writes with configuration
+  // Contract interactions with data references
   const { writeAsync: notifyReward, data: rewardData } = useContractWrite({
     address: STAKING_CONTRACT_ADDRESS,
     abi: STAKING_ABI,
@@ -91,7 +80,164 @@ const AdminDashboard: React.FC = () => {
     functionName: "depositRewards",
   });
 
-  // Transaction watchers
+  // Data fetching
+  const fetchData = useCallback(async () => {
+    if (!address || !publicClient) return;
+
+    try {
+      setLoading(true);
+      setError(null);
+
+      const chainId = await publicClient.getChainId();
+      if (chainId !== 2020) {
+        throw new Error("Please connect to Ronin mainnet");
+      }
+
+      const [newStakingStats, adminRole, maintainerRole, depositorRole] =
+        await Promise.all([
+          getStakingStats(publicClient),
+          checkRole(publicClient, address, "ADMIN"),
+          checkRole(publicClient, address, "MAINTAINER"),
+          checkRole(publicClient, address, "DEPOSITOR"),
+        ]);
+
+      setStakingStats(newStakingStats);
+      setRoles({
+        isAdmin: adminRole,
+        isMaintainer: maintainerRole,
+        isDepositor: depositorRole,
+      });
+    } catch (err: any) {
+      console.error("Error fetching admin data:", err);
+      setError(`Failed to load admin data: ${err.message || "Unknown error"}`);
+    } finally {
+      setLoading(false);
+    }
+  }, [address, publicClient]);
+
+  // Effects
+  useEffect(() => {
+    if (isConnected && address) {
+      fetchData();
+      const interval = setInterval(fetchData, 5000);
+      return () => clearInterval(interval);
+    }
+  }, [isConnected, address, fetchData]);
+
+  // Handle transaction errors
+  const handleTransactionError = (error: any) => {
+    console.error("Transaction error:", error);
+    if (error.code === 4001) {
+      setError("User rejected transaction");
+    } else if (error.message?.includes("insufficient funds")) {
+      setError("Insufficient funds for transaction");
+    } else {
+      setError(error.shortMessage || error.message || "Transaction failed");
+    }
+  };
+
+  // Transaction handlers
+  const handleTransaction = async (
+    action: () => Promise<{ hash: `0x${string}` }>,
+    type: "reward" | "pause" | "deposit"
+  ) => {
+    const statusSetters = {
+      reward: setRewardTxStatus,
+      pause: setPauseTxStatus,
+      deposit: setDepositTxStatus,
+    };
+
+    const hashSetters = {
+      reward: setRewardTxHash,
+      pause: setPauseTxHash,
+      deposit: setDepositTxHash,
+    };
+
+    try {
+      statusSetters[type]("preparing");
+      setError(null);
+      const tx = await action();
+      hashSetters[type](tx.hash);
+      statusSetters[type]("pending");
+    } catch (err: any) {
+      statusSetters[type]("error");
+      handleTransactionError(err);
+    }
+  };
+
+  // Input validation
+  const setErrorState = (type: "reward" | "deposit", message: string) => {
+    if (type === "reward") setRewardInputError(message);
+    else setDepositInputError(message);
+    return false;
+  };
+  
+  const validateRewardAmount = (amount: string): boolean => {
+    if (!amount) return setErrorState("reward", "Amount is required");
+
+    const numAmount = parseFloat(amount);
+    if (isNaN(numAmount))
+      return setErrorState("reward", "Invalid number format");
+    if (numAmount <= 0)
+      return setErrorState("reward", "Must be greater than 0");
+    if (numAmount < parseFloat(MIN_REWARD_AMOUNT))
+      return setErrorState("reward", `Minimum ${MIN_REWARD_AMOUNT}`);
+    if (numAmount > parseFloat(MAX_REWARD_AMOUNT))
+      return setErrorState("reward", `Maximum ${MAX_REWARD_AMOUNT}`);
+
+    setRewardInputError(null);
+    return true;
+  };
+
+  const validateDepositAmount = (amount: string): boolean => {
+    if (!amount) {
+      setDepositInputError("Amount is required");
+      return false;
+    }
+
+    const numAmount = parseFloat(amount);
+    if (isNaN(numAmount)) {
+      setDepositInputError("Invalid number");
+      return false;
+    }
+
+    if (numAmount <= 0) {
+      setDepositInputError("Amount must be greater than zero");
+      return false;
+    }
+
+    setDepositInputError(null);
+    return true;
+  };
+
+  // Specific action handlers
+  const handleSetRewards = async () => {
+    if (!validateRewardAmount(rewardAmount) || rewardTxStatus !== "idle")
+      return;
+    await handleTransaction(
+      () => notifyReward({ args: [parseEther(rewardAmount)] }),
+      "reward"
+    );
+    setRewardAmount("");
+  };
+
+  const handlePauseToggle = async () => {
+    if (pauseTxStatus !== "idle") return;
+    const action = stakingStats?.isPaused ? unpause : pause;
+    await handleTransaction(action, "pause");
+  };
+
+  const handleDepositRewards = async () => {
+    if (!validateDepositAmount(depositAmount) || depositTxStatus !== "idle")
+      return;
+    await handleTransaction(
+      () => depositRewards({ args: [parseEther(depositAmount)] }),
+      "deposit"
+    );
+    setDepositAmount("");
+  };
+
+  // Transaction receipt watchers
   useWaitForTransactionReceipt({
     hash: rewardTxHash,
     onSuccess: () => {
@@ -144,170 +290,6 @@ const AdminDashboard: React.FC = () => {
     },
   });
 
-  const fetchData = useCallback(async () => {
-    if (!address || !publicClient) return;
-
-    try {
-      setLoading(true);
-      setError(null);
-
-      const chainId = await publicClient.getChainId();
-      if (chainId !== 2020) {
-        throw new Error("Please connect to Ronin mainnet");
-      }
-
-      const [newStakingStats, adminRole, maintainerRole, depositorRole] =
-        await Promise.all([
-          getStakingStats(publicClient),
-          checkRole(publicClient, address, "ADMIN"),
-          checkRole(publicClient, address, "MAINTAINER"),
-          checkRole(publicClient, address, "DEPOSITOR"),
-        ]);
-
-      setStakingStats(newStakingStats);
-      setRoles({
-        isAdmin: adminRole,
-        isMaintainer: maintainerRole,
-        isDepositor: depositorRole,
-      });
-    } catch (err: any) {
-      console.error("Error fetching admin data:", err);
-      setError(`Failed to load admin data: ${err.message || "Unknown error"}`);
-    } finally {
-      setLoading(false);
-    }
-  }, [address, publicClient]); // Proper dependencies
-
-  useEffect(() => {
-    if (isConnected && address) {
-      fetchData();
-      const interval = setInterval(fetchData, 5000);
-      return () => clearInterval(interval);
-    }
-  }, [isConnected, address, fetchData]);
-
-  const handleTransaction = async (
-    action: () => Promise<{ hash: `0x${string}` }>,
-    type: "reward" | "pause" | "deposit"
-  ) => {
-    const statusSetters = {
-      reward: setRewardTxStatus,
-      pause: setPauseTxStatus,
-      deposit: setDepositTxStatus,
-    };
-
-    const hashSetters = {
-      reward: setRewardTxHash,
-      pause: setPauseTxHash,
-      deposit: setDepositTxHash,
-    };
-
-    try {
-      statusSetters[type]("preparing");
-      setError(null);
-      const tx = await action();
-      hashSetters[type](tx.hash);
-      statusSetters[type]("pending");
-    } catch (err: any) {
-      statusSetters[type]("error");
-      handleTransactionError(err);
-    }
-  };
-
-  const handleTransactionError = (error: any) => {
-    console.error("Transaction error:", error);
-    if (error.code === 4001) {
-      setError("User rejected transaction");
-    } else if (error.message?.includes("insufficient funds")) {
-      setError("Insufficient funds for transaction");
-    } else {
-      setError(error.shortMessage || error.message || "Transaction failed");
-    }
-  };
-
-  // Reduce polling interval from 30s to 5s for more real-time updates
-  useEffect(() => {
-    if (isConnected && address) {
-      fetchData(); // Initial fetch
-
-      // Set up more frequent polling
-      const interval = setInterval(fetchData, 5000);
-      return () => clearInterval(interval);
-    }
-  }, [isConnected, address, publicClient, fetchData]);
-
-  const setErrorState = (type: "reward" | "deposit", message: string) => {
-    if (type === "reward") setRewardInputError(message);
-    else setDepositInputError(message);
-    return false;
-  };
-
-  // Validate reward amount input
-  const validateRewardAmount = (amount: string): boolean => {
-    if (!amount) return setErrorState("reward", "Amount is required");
-
-    const numAmount = parseFloat(amount);
-    if (isNaN(numAmount))
-      return setErrorState("reward", "Invalid number format");
-    if (numAmount <= 0)
-      return setErrorState("reward", "Must be greater than 0");
-    if (numAmount < parseFloat(MIN_REWARD_AMOUNT))
-      return setErrorState("reward", `Minimum ${MIN_REWARD_AMOUNT}`);
-    if (numAmount > parseFloat(MAX_REWARD_AMOUNT))
-      return setErrorState("reward", `Maximum ${MAX_REWARD_AMOUNT}`);
-
-    setRewardInputError(null);
-    return true;
-  };
-
-  // Validate deposit amount input
-  const validateDepositAmount = (amount: string): boolean => {
-    if (!amount) {
-      setDepositInputError("Amount is required");
-      return false;
-    }
-
-    const numAmount = parseFloat(amount);
-    if (isNaN(numAmount)) {
-      setDepositInputError("Invalid number");
-      return false;
-    }
-
-    if (numAmount <= 0) {
-      setDepositInputError("Amount must be greater than zero");
-      return false;
-    }
-
-    setDepositInputError(null);
-    return true;
-  };
-
-  const handleSetRewards = async () => {
-    if (!validateRewardAmount(rewardAmount) || rewardTxStatus !== "idle")
-      return;
-    await handleTransaction(
-      () => notifyReward({ args: [parseEther(rewardAmount)] }),
-      "reward"
-    );
-    setRewardAmount("");
-  };
-
-  const handlePauseToggle = async () => {
-    if (pauseTxStatus !== "idle") return;
-    const action = stakingStats?.isPaused ? unpause : pause;
-    await handleTransaction(action, "pause");
-  };
-
-  const handleDepositRewards = async () => {
-    if (!validateDepositAmount(depositAmount) || depositTxStatus !== "idle")
-      return;
-    await handleTransaction(
-      () => depositRewards({ args: [parseEther(depositAmount)] }),
-      "deposit"
-    );
-    setDepositAmount("");
-  };
-
   // Helper for rendering transaction status
   const renderTxStatus = (status: TransactionStatus, actionName: string) => {
     const statusConfig = {
@@ -318,7 +300,7 @@ const AdminDashboard: React.FC = () => {
     };
 
     const config = statusConfig[status];
-    if (!config) return null;
+    if (!config || status === "idle") return null;
 
     return (
       <span
@@ -326,7 +308,7 @@ const AdminDashboard: React.FC = () => {
       >
         <config.icon
           className={`h-3 w-3 mr-1 ${
-            status !== "success" ? "animate-spin" : ""
+            status === "pending" || status === "preparing" ? "animate-spin" : ""
           }`}
         />
         {config.text} {actionName}
@@ -346,7 +328,6 @@ const AdminDashboard: React.FC = () => {
     );
   }
 
-  // Replace the existing role check condition
   if (!roles.isAdmin && !roles.isMaintainer && !roles.isDepositor) {
     return (
       <div className="text-center py-20">
@@ -507,7 +488,7 @@ const AdminDashboard: React.FC = () => {
         )}
 
         {/* Pause/Unpause (Maintainer) */}
-        {roles.isMaintainer && (
+        {(roles.isMaintainer || roles.isAdmin) && (
           <div className="bg-gray-800/50 rounded-lg p-6 border border-gray-700">
             <h3 className="text-lg font-semibold mb-4">Contract Control</h3>
             <button
@@ -550,7 +531,7 @@ const AdminDashboard: React.FC = () => {
         )}
 
         {/* Deposit Rewards (Depositor) */}
-        {roles.isDepositor && (
+        {(roles.isDepositor || roles.isAdmin) && (
           <div className="bg-gray-800/50 rounded-lg p-6 border border-gray-700">
             <h3 className="text-lg font-semibold mb-4">Deposit Rewards</h3>
             <div className="space-y-4">
