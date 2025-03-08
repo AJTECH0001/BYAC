@@ -20,6 +20,11 @@ interface StakingDashboardProps {
   walletStatus: WalletStatus;
 }
 
+interface PriceData {
+  price: number;
+  priceChange24h: number;
+}
+
 const StakingDashboard: React.FC<StakingDashboardProps> = ({ walletStatus }) => {
   const { address, isConnected } = useAccount();
   const publicClient = usePublicClient();
@@ -35,8 +40,10 @@ const StakingDashboard: React.FC<StakingDashboardProps> = ({ walletStatus }) => 
   const [error, setError] = useState<string | null>(null);
   const [transactionInProgress, setTransactionInProgress] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
-  const [tokenPrice, setTokenPrice] = useState(1000.00);
+  const [tokenPrice, setTokenPrice] = useState(0);
+  const [priceChange24h, setPriceChange24h] = useState(0);
   const [circulatingSupply, setCirculatingSupply] = useState(159_155_561n);
+  const [isPriceFetching, setIsPriceFetching] = useState(false);
 
   const { data: braidsBalance } = useBalance({
     address,
@@ -49,6 +56,31 @@ const StakingDashboard: React.FC<StakingDashboardProps> = ({ walletStatus }) => 
     const dailyRewards = Number(formatEther(stakingStats.dailyRewards));
     const totalStaked = Number(formatEther(stakingStats.totalStaked));
     return totalStaked > 0 ? ((dailyRewards * 365) / totalStaked) * 100 : 0;
+  };
+
+  const fetchTokenPrice = async () => {
+    try {
+      setIsPriceFetching(true);
+      // Note: BRAIDS may not be listed on CoinGecko; you’d need its ID or contract address
+      const response = await fetch(
+        'https://api.coingecko.com/api/v3/coins/ronin/contract/0xd144a6466aa76cc3a892fda9602372dd884a2c90'
+      );
+      if (!response.ok) {
+        throw new Error('CoinGecko API failed');
+      }
+      const data = await response.json();
+      const price = data.market_data.current_price.usd;
+      const priceChange24h = data.market_data.price_change_percentage_24h;
+      setTokenPrice(price);
+      setPriceChange24h(priceChange24h);
+    } catch (err) {
+      console.error('Error fetching token price:', err);
+      // Fallback to last known value
+      setTokenPrice(0.0001138); // From Jan 22, 2025
+      setPriceChange24h(18.76);
+    } finally {
+      setIsPriceFetching(false);
+    }
   };
 
   const fetchData = async () => {
@@ -79,7 +111,15 @@ const StakingDashboard: React.FC<StakingDashboardProps> = ({ walletStatus }) => 
   };
 
   useEffect(() => {
-    setTokenPrice(1000.00);
+    // Fetch token price on component mount
+    fetchTokenPrice();
+    
+    // Set up interval to periodically update price
+    const priceInterval = window.setInterval(fetchTokenPrice, 300000); // Update every 5 minutes
+    
+    return () => {
+      window.clearInterval(priceInterval);
+    };
   }, []);
 
   useEffect(() => {
@@ -284,7 +324,9 @@ const StakingDashboard: React.FC<StakingDashboardProps> = ({ walletStatus }) => 
             <span className="text-sm text-gray-400">BRAIDS PRICE</span>
           </div>
           <div className="text-xl font-semibold">${tokenPrice.toFixed(2)}</div>
-          <div className="text-sm text-red-400 mt-1">-13.32%</div>
+          <div className={`text-sm ${priceChange24h >= 0 ? 'text-green-400' : 'text-red-400'} mt-1`}>
+            {priceChange24h >= 0 ? '+' : ''}{priceChange24h.toFixed(2)}%
+          </div>
         </div>
 
         <div className="bg-gray-800/50 p-4 rounded-lg border border-gray-700">

@@ -15,7 +15,7 @@ const publicClient = createPublicClient({
   transport: http('https://api.roninchain.com/rpc')
 });
 
-// Validator contract ABI (only the functions we need)
+// Updated Validator contract ABI
 const VALIDATOR_ABI = [
   {
     "inputs": [{ "name": "validator", "type": "address" }],
@@ -37,7 +37,7 @@ const VALIDATOR_ABI = [
   },
   {
     "inputs": [{ "name": "validator", "type": "address" }],
-    "name": "getDelegatorInfo",
+    "name": "getDelegators",
     "outputs": [
       {
         "components": [
@@ -56,6 +56,18 @@ const VALIDATOR_ABI = [
 // Contract address for the validator registry
 const VALIDATOR_REGISTRY = '0x4E5C8147c0F5BfFf3A9E4a266C80d35C8819d38D';
 
+// Shared retry logic
+const retryOperation = async (operation: () => Promise<any>, maxRetries = 3) => {
+  for (let i = 0; i < maxRetries; i++) {
+    try {
+      return await operation();
+    } catch (error) {
+      if (i === maxRetries - 1) throw error;
+      await new Promise(resolve => setTimeout(resolve, 1000 * (i + 1)));
+    }
+  }
+};
+
 export const getValidatorData = async (validatorAddress: string) => {
   try {
     const contract = getContract({
@@ -64,25 +76,9 @@ export const getValidatorData = async (validatorAddress: string) => {
       publicClient
     });
 
-    // Add retries for network issues
-    const retryOperation = async (operation: () => Promise<any>, maxRetries = 3) => {
-      for (let i = 0; i < maxRetries; i++) {
-        try {
-          return await operation();
-        } catch (error) {
-          if (i === maxRetries - 1) throw error;
-          await new Promise(resolve => setTimeout(resolve, 1000 * (i + 1)));
-        }
-      }
-    };
-
     const [validatorInfo, delegators] = await Promise.all([
-      retryOperation(() => contract.read.getValidatorInfo([
-        validatorAddress as `0x${string}`
-      ])),
-      retryOperation(() => contract.read.getDelegatorInfo([
-        validatorAddress as `0x${string}`
-      ]))
+      retryOperation(() => contract.read.getValidatorInfo([validatorAddress as `0x${string}`])),
+      retryOperation(() => contract.read.getDelegators([validatorAddress as `0x${string}`]))
     ]);
 
     return {
@@ -114,81 +110,22 @@ export const getDelegatorsList = async (validatorAddress: string) => {
       publicClient
     });
 
-    // Add retries for network issues
-    const retryOperation = async (operation: () => Promise<any>, maxRetries = 3) => {
-      for (let i = 0; i < maxRetries; i++) {
-        try {
-          return await operation();
-        } catch (error) {
-          if (i === maxRetries - 1) throw error;
-          await new Promise(resolve => setTimeout(resolve, 1000 * (i + 1)));
-        }
-      }
-    };
-
-    const [delegatorInfo, validatorInfo] = await Promise.all([
-      retryOperation(() => contract.read.getDelegatorInfo([validatorAddress as `0x${string}`])),
+    const [delegators, validatorInfo] = await Promise.all([
+      retryOperation(() => contract.read.getDelegators([validatorAddress as `0x${string}`])),
       retryOperation(() => contract.read.getValidatorInfo([validatorAddress as `0x${string}`]))
     ]);
 
     const totalStake = validatorInfo.totalStake;
 
-    // Get token balances for all delegators with retries
-    const getBalanceWithRetry = async (address: string) => {
-      return retryOperation(async () => {
-        const [nativeBalance, braidsBalance] = await Promise.all([
-          publicClient.getBalance({ address: address as `0x${string}` }),
-          getTokenBalance(address, BRAIDS_TOKEN_ADDRESS)
-        ]);
-        return { nativeBalance, braidsBalance };
-      });
-    };
-
-    const balancePromises = delegatorInfo.map(async (info) => {
-      const { nativeBalance, braidsBalance } = await getBalanceWithRetry(info.delegator);
-
-      const stake = info.stake.toString();
-      const percentage = ((Number(stake) / Number(totalStake)) * 100).toFixed(2);
-
-      return {
-        address: info.delegator,
-        stake: stake,
-        percentage: percentage,
-        joinedAt: new Date(Number(info.joinedAt) * 1000).toISOString(),
-        nativeBalance: formatEther(nativeBalance),
-        braidsBalance: formatEther(BigInt(braidsBalance))
-      };
-    });
-
-    return await Promise.all(balancePromises);
+    return delegators.map((info) => ({
+      address: info.delegator,
+      stake: info.stake.toString(),
+      percentage: ((Number(info.stake) / Number(totalStake)) * 100).toFixed(4),
+      joinedAt: new Date(Number(info.joinedAt) * 1000).toISOString(),
+    }));
   } catch (error) {
     console.error('Error fetching delegators:', error);
-    return [
-      {
-        address: '0x1234567890123456789012345678901234567890',
-        stake: '1000000000000000000000',
-        percentage: '25.00',
-        joinedAt: new Date().toISOString(),
-        nativeBalance: '1000.00',
-        braidsBalance: '5000.00'
-      },
-      {
-        address: '0x2345678901234567890123456789012345678901',
-        stake: '800000000000000000000',
-        percentage: '20.00',
-        joinedAt: new Date(Date.now() - 86400000).toISOString(),
-        nativeBalance: '800.00',
-        braidsBalance: '4000.00'
-      },
-      {
-        address: '0x3456789012345678901234567890123456789012',
-        stake: '600000000000000000000',
-        percentage: '15.00',
-        joinedAt: new Date(Date.now() - 172800000).toISOString(),
-        nativeBalance: '600.00',
-        braidsBalance: '3000.00'
-      }
-    ];
+    throw new Error('Failed to fetch delegators list');
   }
 };
 
@@ -197,18 +134,6 @@ export const BRAIDS_TOKEN_ADDRESS = '0xD144A6466aA76Cc3A892Fda9602372dd884a2C90'
 
 export const getTokenBalance = async (address: string, tokenAddress: string) => {
   try {
-    // Add retries for network issues
-    const retryOperation = async (operation: () => Promise<any>, maxRetries = 3) => {
-      for (let i = 0; i < maxRetries; i++) {
-        try {
-          return await operation();
-        } catch (error) {
-          if (i === maxRetries - 1) throw error;
-          await new Promise(resolve => setTimeout(resolve, 1000 * (i + 1)));
-        }
-      }
-    };
-
     const balance = await retryOperation(() => 
       alchemy.core.getTokenBalance(
         address as `0x${string}`, 

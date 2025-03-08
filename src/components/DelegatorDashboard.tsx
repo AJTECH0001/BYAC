@@ -1,7 +1,24 @@
-import React, { useState, useEffect } from 'react';
-import { Users, User, Copy, ExternalLink, Trophy, Wallet, AlertCircle, Shield, Award, TrendingUp, Clock, Percent } from 'lucide-react';
-import { formatEther } from 'viem';
-import { getValidatorData, getDelegatorsList, VALIDATOR_ADDRESS } from '../utils/alchemy';
+import React, { useState, useEffect } from "react";
+import {
+  Users,
+  User,
+  Copy,
+  ExternalLink,
+  Trophy,
+  Wallet,
+  AlertCircle,
+  Shield,
+  Award,
+  TrendingUp,
+  Clock,
+  Percent,
+} from "lucide-react";
+import { formatEther } from "viem";
+import {
+  getValidatorData,
+  getDelegatorsList,
+  VALIDATOR_ADDRESS,
+} from "../utils/alchemy";
 
 interface Delegator {
   address: string;
@@ -25,56 +42,51 @@ interface ValidatorStats {
 const DelegatorDashboard: React.FC = () => {
   const [delegators, setDelegators] = useState<Delegator[]>([]);
   const [validatorStats, setValidatorStats] = useState<ValidatorStats>({
-    totalStake: '0',
+    totalStake: "0",
     totalDelegators: 0,
-    apr: '0',
-    commission: '0',
-    uptime: '0',
-    lastSignedBlock: '0'
+    apr: "0",
+    commission: "0",
+    uptime: "0",
+    lastSignedBlock: "0",
   });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [copiedAddress, setCopiedAddress] = useState<string | null>(null);
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 50;
 
   const fetchData = async () => {
     try {
       setLoading(true);
       setError(null);
-  
+
+      // Fetch validator data
       const validatorData = await getValidatorData(VALIDATOR_ADDRESS);
       if (!validatorData) {
-        throw new Error('Failed to fetch validator data');
+        throw new Error("Failed to fetch validator data");
       }
-  
+
+      // Fetch delegator list
       const delegatorList = await getDelegatorsList(VALIDATOR_ADDRESS);
       if (!delegatorList) {
-        throw new Error('Failed to fetch delegator list');
+        throw new Error("Failed to fetch delegator list");
       }
-  
+
+      // Sort delegators by stake
       const enrichedDelegators = delegatorList
         .map((delegator, index) => ({
           ...delegator,
-          rank: index + 1
+          rank: index + 1,
         }))
         .sort((a, b) => Number(BigInt(b.stake) - BigInt(a.stake)));
-  
-      setValidatorStats({
-        ...validatorData,
-        totalDelegators: delegatorList.length // Update totalDelegators from actual list
-      });
+
+      setValidatorStats(validatorData);
       setDelegators(enrichedDelegators);
+      setError(null);
     } catch (error: any) {
-      console.error('Error fetching data:', error);
-      setError(error.message || 'Failed to load delegator data. Please try again later.');
+      console.error("Error fetching data:", error);
+      setError("Failed to load delegator data. Please try again later.");
       setDelegators([]);
-      setValidatorStats({
-        totalStake: '0',
-        totalDelegators: 0,
-        apr: '0',
-        commission: '0',
-        uptime: '0',
-        lastSignedBlock: '0'
-      });
     } finally {
       setLoading(false);
     }
@@ -87,7 +99,7 @@ const DelegatorDashboard: React.FC = () => {
     const initFetch = async () => {
       if (mounted) {
         await fetchData();
-        
+
         if (mounted && !error) {
           intervalId = window.setInterval(() => {
             if (mounted) {
@@ -114,7 +126,7 @@ const DelegatorDashboard: React.FC = () => {
       setCopiedAddress(address);
       setTimeout(() => setCopiedAddress(null), 2000);
     } catch (error) {
-      console.error('Failed to copy:', error);
+      console.error("Failed to copy:", error);
     }
   };
 
@@ -153,7 +165,9 @@ const DelegatorDashboard: React.FC = () => {
           <div>
             <h2 className="text-2xl font-bold">BYAC Validator</h2>
             <div className="flex items-center space-x-2 mt-1">
-              <span className="text-sm text-gray-400">{VALIDATOR_ADDRESS.slice(0, 6)}...{VALIDATOR_ADDRESS.slice(-4)}</span>
+              <span className="text-sm text-gray-400">
+                {VALIDATOR_ADDRESS.slice(0, 6)}...{VALIDATOR_ADDRESS.slice(-4)}
+              </span>
               <button
                 onClick={() => copyToClipboard(VALIDATOR_ADDRESS)}
                 className="p-1 hover:bg-gray-700 rounded transition-colors"
@@ -184,7 +198,9 @@ const DelegatorDashboard: React.FC = () => {
               <span className="text-sm text-gray-400">Total Stake</span>
               <Shield className="h-5 w-5 text-purple-400" />
             </div>
-            <div className="text-xl font-semibold">{formatEther(BigInt(validatorStats.totalStake))} RON</div>
+            <div className="text-xl font-semibold">
+              {formatEther(BigInt(validatorStats.totalStake))} RON
+            </div>
           </div>
 
           <div className="bg-gray-800/50 rounded-lg p-6 border border-gray-700">
@@ -192,7 +208,9 @@ const DelegatorDashboard: React.FC = () => {
               <span className="text-sm text-gray-400">Delegators</span>
               <Users className="h-5 w-5 text-blue-400" />
             </div>
-            <div className="text-xl font-semibold">{validatorStats.totalDelegators}</div>
+            <div className="text-xl font-semibold">
+              {validatorStats.totalDelegators}
+            </div>
           </div>
 
           <div className="bg-gray-800/50 rounded-lg p-6 border border-gray-700">
@@ -208,7 +226,9 @@ const DelegatorDashboard: React.FC = () => {
               <span className="text-sm text-gray-400">Commission</span>
               <Percent className="h-5 w-5 text-yellow-400" />
             </div>
-            <div className="text-xl font-semibold">{validatorStats.commission}%</div>
+            <div className="text-xl font-semibold">
+              {validatorStats.commission}%
+            </div>
           </div>
 
           <div className="bg-gray-800/50 rounded-lg p-6 border border-gray-700">
@@ -216,7 +236,9 @@ const DelegatorDashboard: React.FC = () => {
               <span className="text-sm text-gray-400">Uptime</span>
               <Award className="h-5 w-5 text-orange-400" />
             </div>
-            <div className="text-xl font-semibold">{validatorStats.uptime}%</div>
+            <div className="text-xl font-semibold">
+              {validatorStats.uptime}%
+            </div>
           </div>
 
           <div className="bg-gray-800/50 rounded-lg p-6 border border-gray-700">
@@ -224,7 +246,9 @@ const DelegatorDashboard: React.FC = () => {
               <span className="text-sm text-gray-400">Last Block</span>
               <Clock className="h-5 w-5 text-indigo-400" />
             </div>
-            <div className="text-xl font-semibold">#{validatorStats.lastSignedBlock}</div>
+            <div className="text-xl font-semibold">
+              #{validatorStats.lastSignedBlock}
+            </div>
           </div>
         </div>
       </div>
@@ -235,7 +259,9 @@ const DelegatorDashboard: React.FC = () => {
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center space-x-3">
               <Users className="h-6 w-6 text-purple-400" />
-              <h2 className="text-xl font-semibold">Active Delegators ({validatorStats.totalDelegators})</h2>
+              <h2 className="text-xl font-semibold">
+                Active Delegators ({validatorStats.totalDelegators})
+              </h2>
             </div>
           </div>
           <div className="overflow-x-auto">
@@ -244,9 +270,13 @@ const DelegatorDashboard: React.FC = () => {
                 <tr className="text-left border-b border-gray-700">
                   <th className="pb-4 font-semibold text-gray-400">Rank</th>
                   <th className="pb-4 font-semibold text-gray-400">Address</th>
-                  <th className="pb-4 font-semibold text-gray-400">Stake Amount</th>
+                  <th className="pb-4 font-semibold text-gray-400">
+                    Stake Amount
+                  </th>
                   <th className="pb-4 font-semibold text-gray-400">Share</th>
-                  <th className="pb-4 font-semibold text-gray-400">Wallet Balance</th>
+                  <th className="pb-4 font-semibold text-gray-400">
+                    Wallet Balance
+                  </th>
                   <th className="pb-4 font-semibold text-gray-400">Joined</th>
                   <th className="pb-4 font-semibold text-gray-400">Actions</th>
                 </tr>
@@ -256,12 +286,17 @@ const DelegatorDashboard: React.FC = () => {
                   <tr key={delegator.address} className="hover:bg-gray-700/30">
                     <td className="py-4">
                       <div className="flex items-center space-x-2">
-                        <Trophy className={`h-5 w-5 ${
-                          delegator.rank === 1 ? 'text-yellow-400' :
-                          delegator.rank === 2 ? 'text-gray-400' :
-                          delegator.rank === 3 ? 'text-amber-600' :
-                          'text-gray-600'
-                        }`} />
+                        <Trophy
+                          className={`h-5 w-5 ${
+                            delegator.rank === 1
+                              ? "text-yellow-400"
+                              : delegator.rank === 2
+                              ? "text-gray-400"
+                              : delegator.rank === 3
+                              ? "text-amber-600"
+                              : "text-gray-600"
+                          }`}
+                        />
                         <span className="font-medium">#{delegator.rank}</span>
                       </div>
                     </td>
@@ -274,11 +309,16 @@ const DelegatorDashboard: React.FC = () => {
                           rel="noopener noreferrer"
                           className="text-purple-400 hover:text-purple-300 transition-colors"
                         >
-                          {`${delegator.address.slice(0, 6)}...${delegator.address.slice(-4)}`}
+                          {`${delegator.address.slice(
+                            0,
+                            6
+                          )}...${delegator.address.slice(-4)}`}
                         </a>
                       </div>
                     </td>
-                    <td className="py-4">{formatEther(BigInt(delegator.stake))} RON</td>
+                    <td className="py-4">
+                      {formatEther(BigInt(delegator.stake))} RON
+                    </td>
                     <td className="py-4">{delegator.percentage}%</td>
                     <td className="py-4">
                       <div className="flex flex-col space-y-1">
@@ -303,7 +343,9 @@ const DelegatorDashboard: React.FC = () => {
                           title="Copy Address"
                         >
                           {copiedAddress === delegator.address ? (
-                            <span className="text-green-400 text-sm">Copied!</span>
+                            <span className="text-green-400 text-sm">
+                              Copied!
+                            </span>
                           ) : (
                             <Copy className="h-4 w-4 text-gray-400" />
                           )}

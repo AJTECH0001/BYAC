@@ -22,6 +22,8 @@ import {
   getStakingStats,
   checkRole,
   StakingStats,
+  BRAIDS_TOKEN_ABI,
+  BRAIDS_TOKEN_ADDRESS,
 } from "../contracts/StakingContract";
 
 // Define transaction status type
@@ -46,14 +48,20 @@ const AdminDashboard: React.FC = () => {
   const [depositAmount, setDepositAmount] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [rewardTxStatus, setRewardTxStatus] = useState<TransactionStatus>("idle");
+  const [rewardTxStatus, setRewardTxStatus] =
+    useState<TransactionStatus>("idle");
   const [pauseTxStatus, setPauseTxStatus] = useState<TransactionStatus>("idle");
-  const [depositTxStatus, setDepositTxStatus] = useState<TransactionStatus>("idle");
+  const [depositTxStatus, setDepositTxStatus] =
+    useState<TransactionStatus>("idle");
   const [rewardTxHash, setRewardTxHash] = useState<`0x${string}` | null>(null);
   const [pauseTxHash, setPauseTxHash] = useState<`0x${string}` | null>(null);
-  const [depositTxHash, setDepositTxHash] = useState<`0x${string}` | null>(null);
+  const [depositTxHash, setDepositTxHash] = useState<`0x${string}` | null>(
+    null
+  );
   const [rewardInputError, setRewardInputError] = useState<string | null>(null);
-  const [depositInputError, setDepositInputError] = useState<string | null>(null);
+  const [depositInputError, setDepositInputError] = useState<string | null>(
+    null
+  );
 
   // Contract interactions with data references
   const { writeAsync: notifyReward, data: rewardData } = useContractWrite({
@@ -78,6 +86,12 @@ const AdminDashboard: React.FC = () => {
     address: STAKING_CONTRACT_ADDRESS,
     abi: STAKING_ABI,
     functionName: "depositRewards",
+  });
+
+  const { writeAsync: approve } = useContractWrite({
+    address: BRAIDS_TOKEN_ADDRESS,
+    abi: BRAIDS_TOKEN_ABI,
+    functionName: "approve",
   });
 
   // Data fetching
@@ -171,7 +185,7 @@ const AdminDashboard: React.FC = () => {
     else setDepositInputError(message);
     return false;
   };
-  
+
   const validateRewardAmount = (amount: string): boolean => {
     if (!amount) return setErrorState("reward", "Amount is required");
 
@@ -230,13 +244,41 @@ const AdminDashboard: React.FC = () => {
   const handleDepositRewards = async () => {
     if (!validateDepositAmount(depositAmount) || depositTxStatus !== "idle")
       return;
+
+    const parsedAmount = parseEther(depositAmount);
+
+    // Check allowance
+    const currentAllowance = await publicClient.readContract({
+      address: BRAIDS_TOKEN_ADDRESS,
+      abi: BRAIDS_TOKEN_ABI,
+      functionName: "allowance",
+      args: [address, STAKING_CONTRACT_ADDRESS],
+    });
+
+    if (currentAllowance < parsedAmount) {
+      setDepositTxStatus("preparing");
+      try {
+        const { hash } = await approve({
+          args: [STAKING_CONTRACT_ADDRESS, parsedAmount],
+        });
+        setDepositTxHash(approveHash);
+        setDepositTxStatus("pending");
+        await publicClient.waitForTransactionReceipt({ hash: approveHash });
+        setDepositTxStatus("success");
+      } catch (error) {
+        setDepositTxStatus("error");
+        handleTransactionError(error);
+        return;
+      }
+    }
+
+    // Now, proceed with depositing rewards
     await handleTransaction(
-      () => depositRewards({ args: [parseEther(depositAmount)] }),
+      () => depositRewards({ args: [parsedAmount] }),
       "deposit"
     );
     setDepositAmount("");
   };
-
   // Transaction receipt watchers
   useWaitForTransactionReceipt({
     hash: rewardTxHash,

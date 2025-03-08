@@ -1,4 +1,5 @@
 import { Address, PublicClient } from 'viem';
+export const BRAIDS_TOKEN_ADDRESS = '0xD144A6466aA76Cc3A892Fda9602372dd884a2C90';
 
 // Contract address on Ronin mainnet
 export const STAKING_CONTRACT_ADDRESS = '0x7262035c2f5c2032e5247e6dd095fc02c889d5d6';
