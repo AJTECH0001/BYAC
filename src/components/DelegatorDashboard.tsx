@@ -12,6 +12,8 @@ import {
   TrendingUp,
   Clock,
   Percent,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 import { formatEther } from "viem";
 import {
@@ -127,6 +129,18 @@ const DelegatorDashboard: React.FC = () => {
       setTimeout(() => setCopiedAddress(null), 2000);
     } catch (error) {
       console.error("Failed to copy:", error);
+    }
+  };
+
+  // Pagination calculations
+  const totalPages = Math.ceil(delegators.length / itemsPerPage);
+  const startIndex = (currentPage - 1) * itemsPerPage;
+  const endIndex = startIndex + itemsPerPage;
+  const currentDelegators = delegators.slice(startIndex, endIndex);
+
+  const goToPage = (page: number) => {
+    if (page >= 1 && page <= totalPages) {
+      setCurrentPage(page);
     }
   };
 
@@ -263,6 +277,9 @@ const DelegatorDashboard: React.FC = () => {
                 Active Delegators ({validatorStats.totalDelegators})
               </h2>
             </div>
+            <div className="text-sm text-gray-400">
+              Showing {startIndex + 1}-{Math.min(endIndex, delegators.length)} of {delegators.length}
+            </div>
           </div>
           <div className="overflow-x-auto">
             <table className="w-full">
@@ -282,7 +299,7 @@ const DelegatorDashboard: React.FC = () => {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-700">
-                {delegators.map((delegator) => (
+                {currentDelegators.map((delegator) => (
                   <tr key={delegator.address} className="hover:bg-gray-700/30">
                     <td className="py-4">
                       <div className="flex items-center space-x-2">
@@ -366,6 +383,61 @@ const DelegatorDashboard: React.FC = () => {
               </tbody>
             </table>
           </div>
+
+          {/* Pagination controls */}
+          {totalPages > 1 && (
+            <div className="flex items-center justify-between mt-6 border-t border-gray-700 pt-4">
+              <div className="flex items-center space-x-2">
+                <button
+                  onClick={() => goToPage(currentPage - 1)}
+                  disabled={currentPage === 1}
+                  className={`p-2 rounded ${
+                    currentPage === 1
+                      ? "text-gray-600 cursor-not-allowed"
+                      : "text-gray-400 hover:bg-gray-700"
+                  }`}
+                >
+                  <ChevronLeft className="h-5 w-5" />
+                </button>
+                <div className="text-gray-400">
+                  Page {currentPage} of {totalPages}
+                </div>
+                <button
+                  onClick={() => goToPage(currentPage + 1)}
+                  disabled={currentPage === totalPages}
+                  className={`p-2 rounded ${
+                    currentPage === totalPages
+                      ? "text-gray-600 cursor-not-allowed"
+                      : "text-gray-400 hover:bg-gray-700"
+                  }`}
+                >
+                  <ChevronRight className="h-5 w-5" />
+                </button>
+              </div>
+
+              <div className="flex items-center space-x-2">
+                <select
+                  value={currentPage}
+                  onChange={(e) => goToPage(Number(e.target.value))}
+                  className="bg-gray-800 border border-gray-700 rounded p-2 text-gray-400"
+                >
+                  {Array.from({ length: totalPages }, (_, i) => i + 1).map(
+                    (page) => (
+                      <option key={page} value={page}>
+                        {page}
+                      </option>
+                    )
+                  )}
+                </select>
+                <button
+                  onClick={() => fetchData()}
+                  className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded transition-colors"
+                >
+                  Refresh
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>

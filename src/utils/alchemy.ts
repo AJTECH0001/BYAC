@@ -18,17 +18,19 @@ const publicClient = createPublicClient({
 // Updated Validator contract ABI
 const VALIDATOR_ABI = [
   {
-    "inputs": [{ "name": "validator", "type": "address" }],
+    "inputs": [{ "internalType": "address", "name": "validator", "type": "address" }],
     "name": "getValidatorInfo",
     "outputs": [
       {
         "components": [
-          { "name": "totalStake", "type": "uint256" },
-          { "name": "commission", "type": "uint256" },
-          { "name": "apr", "type": "uint256" },
-          { "name": "uptime", "type": "uint256" },
-          { "name": "lastSignedBlock", "type": "uint256" }
+          { "internalType": "uint256", "name": "totalStake", "type": "uint256" },
+          { "internalType": "uint256", "name": "commission", "type": "uint256" },
+          { "internalType": "uint256", "name": "apr", "type": "uint256" },
+          { "internalType": "uint256", "name": "uptime", "type": "uint256" },
+          { "internalType": "uint256", "name": "lastSignedBlock", "type": "uint256" }
         ],
+        "internalType": "struct IValidator.ValidatorInfo",
+        "name": "",
         "type": "tuple"
       }
     ],
@@ -36,15 +38,17 @@ const VALIDATOR_ABI = [
     "type": "function"
   },
   {
-    "inputs": [{ "name": "validator", "type": "address" }],
+    "inputs": [{ "internalType": "address", "name": "validator", "type": "address" }],
     "name": "getDelegators",
     "outputs": [
       {
         "components": [
-          { "name": "delegator", "type": "address" },
-          { "name": "stake", "type": "uint256" },
-          { "name": "joinedAt", "type": "uint256" }
+          { "internalType": "address", "name": "delegator", "type": "address" },
+          { "internalType": "uint256", "name": "stake", "type": "uint256" },
+          { "internalType": "uint256", "name": "joinedAt", "type": "uint256" }
         ],
+        "internalType": "struct IValidator.DelegatorInfo[]",
+        "name": "",
         "type": "tuple[]"
       }
     ],
@@ -63,6 +67,7 @@ const retryOperation = async (operation: () => Promise<any>, maxRetries = 3) => 
       return await operation();
     } catch (error) {
       if (i === maxRetries - 1) throw error;
+      console.log(`Retry attempt ${i + 1} after error:`, error);
       await new Promise(resolve => setTimeout(resolve, 1000 * (i + 1)));
     }
   }
@@ -70,16 +75,26 @@ const retryOperation = async (operation: () => Promise<any>, maxRetries = 3) => 
 
 export const getValidatorData = async (validatorAddress: string) => {
   try {
+    // Ensure the address is formatted correctly
+    const formattedAddress = validatorAddress.toLowerCase() as `0x${string}`;
+    
     const contract = getContract({
       address: VALIDATOR_REGISTRY as `0x${string}`,
       abi: VALIDATOR_ABI,
       publicClient
     });
 
-    const [validatorInfo, delegators] = await Promise.all([
-      retryOperation(() => contract.read.getValidatorInfo([validatorAddress as `0x${string}`])),
-      retryOperation(() => contract.read.getDelegators([validatorAddress as `0x${string}`]))
-    ]);
+    // Debug
+    console.log("Contract methods:", Object.keys(contract.read));
+    
+    const validatorInfo = await retryOperation(() => 
+      contract.read.getValidatorInfo([formattedAddress])
+    );
+    
+    // Fetch delegators count separately to avoid redundant calls
+    const delegators = await retryOperation(() => 
+      contract.read.getDelegators([formattedAddress])
+    );
 
     return {
       totalStake: validatorInfo.totalStake.toString(),
@@ -104,27 +119,66 @@ export const getValidatorData = async (validatorAddress: string) => {
 
 export const getDelegatorsList = async (validatorAddress: string) => {
   try {
+    // Ensure the address is formatted correctly
+    const formattedAddress = validatorAddress.toLowerCase() as `0x${string}`;
+    
     const contract = getContract({
       address: VALIDATOR_REGISTRY as `0x${string}`,
       abi: VALIDATOR_ABI,
       publicClient
     });
-
+    
+    // Debug
+    console.log("Getting delegators for:", formattedAddress);
+    
     const [delegators, validatorInfo] = await Promise.all([
-      retryOperation(() => contract.read.getDelegators([validatorAddress as `0x${string}`])),
-      retryOperation(() => contract.read.getValidatorInfo([validatorAddress as `0x${string}`]))
+      retryOperation(() => contract.read.getDelegators([formattedAddress])),
+      retryOperation(() => contract.read.getValidatorInfo([formattedAddress]))
     ]);
 
     const totalStake = validatorInfo.totalStake;
+    
+    // Enhance delegator data with additional information
+    const enhancedDelegators = await Promise.all(
+      delegators.map(async (info) => {
+        try {
+          // Get RON balance
+          const nativeBalance = await publicClient.getBalance({
+            address: info.delegator as `0x${string}`
+          });
+          
+          // Get BRAIDS token balance
+          const braidsBalance = await getTokenBalance(
+            info.delegator,
+            BRAIDS_TOKEN_ADDRESS
+          );
+          
+          return {
+            address: info.delegator,
+            stake: info.stake.toString(),
+            percentage: ((Number(info.stake) / Number(totalStake)) * 100).toFixed(4),
+            joinedAt: new Date(Number(info.joinedAt) * 1000).toISOString(),
+            nativeBalance: parseFloat(formatEther(nativeBalance)).toFixed(2),
+            braidsBalance: parseFloat(formatEther(BigInt(braidsBalance))).toFixed(2)
+          };
+        } catch (error) {
+          console.error('Error enhancing delegator data:', error);
+          return {
+            address: info.delegator,
+            stake: info.stake.toString(),
+            percentage: ((Number(info.stake) / Number(totalStake)) * 100).toFixed(4),
+            joinedAt: new Date(Number(info.joinedAt) * 1000).toISOString(),
+            nativeBalance: "0.00",
+            braidsBalance: "0.00"
+          };
+        }
+      })
+    );
 
-    return delegators.map((info) => ({
-      address: info.delegator,
-      stake: info.stake.toString(),
-      percentage: ((Number(info.stake) / Number(totalStake)) * 100).toFixed(4),
-      joinedAt: new Date(Number(info.joinedAt) * 1000).toISOString(),
-    }));
+    return enhancedDelegators;
   } catch (error) {
     console.error('Error fetching delegators:', error);
+    console.error('Error details:', error);
     throw new Error('Failed to fetch delegators list');
   }
 };
