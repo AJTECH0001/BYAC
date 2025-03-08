@@ -347,7 +347,7 @@ const StakingDashboard: React.FC<StakingDashboardProps> = ({
           <div className="flex items-center justify-between">
             <span className="text-sm text-gray-400">BRAIDS PRICE</span>
           </div>
-          <div className="text-xl font-semibold">${tokenPrice.toFixed(4)}</div>
+          <div className="text-xl font-semibold">${tokenPrice.toFixed(6)}</div>
           <div
             className={`text-sm ${
               priceChange24h >= 0 ? "text-green-400" : "text-red-400"

@@ -1,5 +1,5 @@
 import { Alchemy, Network } from 'alchemy-sdk';
-import { createPublicClient, http, formatEther, getContract } from 'viem';
+import { createPublicClient, http, formatEther, getContract, getAddress } from 'viem';
 import { ronin } from 'viem/chains';
 
 const settings = {
@@ -12,7 +12,10 @@ export const alchemy = new Alchemy(settings);
 // Create a public client for Ronin
 const publicClient = createPublicClient({
   chain: ronin,
-  transport: http('https://api.roninchain.com/rpc')
+  transport: http('https://api.roninchain.com/rpc', {
+    retryCount: 3,
+    retryDelay: 1000
+  })
 });
 
 // Updated Validator contract ABI
@@ -57,8 +60,10 @@ const VALIDATOR_ABI = [
   }
 ] as const;
 
-// Contract address for the validator registry
-const VALIDATOR_REGISTRY = '0x4E5C8147c0F5BfFf3A9E4a266C80d35C8819d38D';
+// Update contract address definitions using getAddress for proper checksum formatting
+const VALIDATOR_REGISTRY = getAddress('0x4E5C8147c0F5BfFf3A9E4a266C80d35C8819d38D');
+export const VALIDATOR_ADDRESS = getAddress('0xedcafc4ad8097c2012980a2a7087d74b86bddaf9');
+export const BRAIDS_TOKEN_ADDRESS = getAddress('0xD144A6466aA76Cc3A892Fda9602372dd884a2C90');
 
 // Shared retry logic
 const retryOperation = async (operation: () => Promise<any>, maxRetries = 3) => {
@@ -66,8 +71,8 @@ const retryOperation = async (operation: () => Promise<any>, maxRetries = 3) => 
     try {
       return await operation();
     } catch (error) {
+      console.error(`Attempt ${i + 1} failed:`, error);
       if (i === maxRetries - 1) throw error;
-      console.log(`Retry attempt ${i + 1} after error:`, error);
       await new Promise(resolve => setTimeout(resolve, 1000 * (i + 1)));
     }
   }
@@ -75,26 +80,27 @@ const retryOperation = async (operation: () => Promise<any>, maxRetries = 3) => 
 
 export const getValidatorData = async (validatorAddress: string) => {
   try {
-    // Ensure the address is formatted correctly
-    const formattedAddress = validatorAddress.toLowerCase() as `0x${string}`;
+    // Use getAddress to ensure proper formatting of the address
+    const formattedAddress = getAddress(validatorAddress);
     
-    const contract = getContract({
-      address: VALIDATOR_REGISTRY as `0x${string}`,
-      abi: VALIDATOR_ABI,
-      publicClient
-    });
-
-    // Debug
-    console.log("Contract methods:", Object.keys(contract.read));
-    
-    const validatorInfo = await retryOperation(() => 
-      contract.read.getValidatorInfo([formattedAddress])
-    );
-    
-    // Fetch delegators count separately to avoid redundant calls
-    const delegators = await retryOperation(() => 
-      contract.read.getDelegators([formattedAddress])
-    );
+    const [validatorInfo, delegators] = await Promise.all([
+      retryOperation(() =>
+        publicClient.readContract({
+          address: VALIDATOR_REGISTRY,
+          abi: VALIDATOR_ABI,
+          functionName: 'getValidatorInfo',
+          args: [formattedAddress]
+        })
+      ),
+      retryOperation(() =>
+        publicClient.readContract({
+          address: VALIDATOR_REGISTRY,
+          abi: VALIDATOR_ABI,
+          functionName: 'getDelegators',
+          args: [formattedAddress]
+        })
+      )
+    ]);
 
     return {
       totalStake: validatorInfo.totalStake.toString(),
@@ -119,21 +125,26 @@ export const getValidatorData = async (validatorAddress: string) => {
 
 export const getDelegatorsList = async (validatorAddress: string) => {
   try {
-    // Ensure the address is formatted correctly
-    const formattedAddress = validatorAddress.toLowerCase() as `0x${string}`;
-    
-    const contract = getContract({
-      address: VALIDATOR_REGISTRY as `0x${string}`,
-      abi: VALIDATOR_ABI,
-      publicClient
-    });
-    
-    // Debug
-    console.log("Getting delegators for:", formattedAddress);
+    // Use getAddress to ensure proper formatting of the address
+    const formattedAddress = getAddress(validatorAddress);
     
     const [delegators, validatorInfo] = await Promise.all([
-      retryOperation(() => contract.read.getDelegators([formattedAddress])),
-      retryOperation(() => contract.read.getValidatorInfo([formattedAddress]))
+      retryOperation(() =>
+        publicClient.readContract({
+          address: VALIDATOR_REGISTRY,
+          abi: VALIDATOR_ABI,
+          functionName: 'getDelegators',
+          args: [formattedAddress]
+        })
+      ),
+      retryOperation(() =>
+        publicClient.readContract({
+          address: VALIDATOR_REGISTRY,
+          abi: VALIDATOR_ABI,
+          functionName: 'getValidatorInfo',
+          args: [formattedAddress]
+        })
+      )
     ]);
 
     const totalStake = validatorInfo.totalStake;
@@ -144,7 +155,7 @@ export const getDelegatorsList = async (validatorAddress: string) => {
         try {
           // Get RON balance
           const nativeBalance = await publicClient.getBalance({
-            address: info.delegator as `0x${string}`
+            address: info.delegator
           });
           
           // Get BRAIDS token balance
@@ -183,15 +194,15 @@ export const getDelegatorsList = async (validatorAddress: string) => {
   }
 };
 
-export const VALIDATOR_ADDRESS = '0xedcafc4ad8097c2012980a2a7087d74b86bddaf9';
-export const BRAIDS_TOKEN_ADDRESS = '0xD144A6466aA76Cc3A892Fda9602372dd884a2C90';
-
 export const getTokenBalance = async (address: string, tokenAddress: string) => {
   try {
+    const formattedAddress = getAddress(address);
+    const formattedTokenAddress = getAddress(tokenAddress);
+    
     const balance = await retryOperation(() => 
       alchemy.core.getTokenBalance(
-        address as `0x${string}`, 
-        tokenAddress as `0x${string}`
+        formattedAddress, 
+        formattedTokenAddress
       )
     );
     return balance.toString();
