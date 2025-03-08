@@ -242,43 +242,47 @@ const AdminDashboard: React.FC = () => {
   };
 
   const handleDepositRewards = async () => {
-    if (!validateDepositAmount(depositAmount) || depositTxStatus !== "idle")
-      return;
-
+    if (!validateDepositAmount(depositAmount) || depositTxStatus !== "idle") return;
+  
     const parsedAmount = parseEther(depositAmount);
-
-    // Check allowance
-    const currentAllowance = await publicClient.readContract({
-      address: BRAIDS_TOKEN_ADDRESS,
-      abi: BRAIDS_TOKEN_ABI,
-      functionName: "allowance",
-      args: [address, STAKING_CONTRACT_ADDRESS],
-    });
-
-    if (currentAllowance < parsedAmount) {
+  
+    try {
       setDepositTxStatus("preparing");
-      try {
-        const { hash } = await approve({
+      setError(null);
+  
+      // Check allowance
+      const currentAllowance = await publicClient.readContract({
+        address: BRAIDS_TOKEN_ADDRESS,
+        abi: BRAIDS_TOKEN_ABI,
+        functionName: "allowance",
+        args: [address, STAKING_CONTRACT_ADDRESS],
+      });
+  
+      if (currentAllowance < parsedAmount) {
+        // Step 1: Approve the staking contract to spend BRAIDS
+        const { hash: approveHash } = await approve({
           args: [STAKING_CONTRACT_ADDRESS, parsedAmount],
         });
         setDepositTxHash(approveHash);
         setDepositTxStatus("pending");
+  
         await publicClient.waitForTransactionReceipt({ hash: approveHash });
-        setDepositTxStatus("success");
-      } catch (error) {
-        setDepositTxStatus("error");
-        handleTransactionError(error);
-        return;
+        setDepositTxStatus("success"); // Approval succeeded, reset for deposit step
+        setDepositTxHash(null); // Clear hash for the next transaction
       }
+  
+      // Step 2: Deposit rewards
+      await handleTransaction(
+        () => depositRewards({ args: [parsedAmount] }),
+        "deposit"
+      );
+      setDepositAmount("");
+    } catch (error) {
+      setDepositTxStatus("error");
+      handleTransactionError(error);
     }
-
-    // Now, proceed with depositing rewards
-    await handleTransaction(
-      () => depositRewards({ args: [parsedAmount] }),
-      "deposit"
-    );
-    setDepositAmount("");
   };
+  
   // Transaction receipt watchers
   useWaitForTransactionReceipt({
     hash: rewardTxHash,
