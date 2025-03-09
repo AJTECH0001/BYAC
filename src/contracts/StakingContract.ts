@@ -135,6 +135,17 @@ export const BRAIDS_TOKEN_ABI = [
   {
     "constant": true,
     "inputs": [
+      {"name": "owner", "type": "address"}
+    ],
+    "name": "balanceOf",
+    "outputs": [{"name": "", "type": "uint256"}],
+    "payable": false,
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "constant": true,
+    "inputs": [
       {"name": "owner", "type": "address"},
       {"name": "spender", "type": "address"}
     ],
@@ -156,7 +167,7 @@ export const BRAIDS_TOKEN_ABI = [
     "stateMutability": "nonpayable",
     "type": "function"
   }
-]as const;
+] as const;
 
 export interface StakingStats {
   totalStaked: bigint;

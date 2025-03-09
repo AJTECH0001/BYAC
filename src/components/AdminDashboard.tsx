@@ -242,74 +242,73 @@ const AdminDashboard: React.FC = () => {
   };
 
   const handleDepositRewards = async () => {
-    if (!validateDepositAmount(depositAmount) || depositTxStatus !== "idle") return;
-
+    if (!validateDepositAmount(depositAmount) || depositTxStatus !== "idle" || !address) return;
+  
     const parsedAmount = parseEther(depositAmount);
-    console.log("Parsed Deposit Amount:", parsedAmount);
-
+    
     try {
       setDepositTxStatus("preparing");
       setError(null);
-
+  
       // Check user balance
       const balance = await publicClient.readContract({
         address: BRAIDS_TOKEN_ADDRESS,
         abi: BRAIDS_TOKEN_ABI,
         functionName: "balanceOf",
         args: [address],
-      });
-      console.log("User Balance:", formatEther(balance));
+      }) as bigint;
+  
       if (parsedAmount > balance) {
-        setError("Insufficient BRAIDS balance");
+        setError(`Insufficient BRAIDS balance. Have: ${formatEther(balance)}, Need: ${depositAmount}`);
         setDepositTxStatus("error");
         return;
       }
-
+  
       // Check allowance
       const currentAllowance = await publicClient.readContract({
         address: BRAIDS_TOKEN_ADDRESS,
         abi: BRAIDS_TOKEN_ABI,
         functionName: "allowance",
         args: [address, STAKING_CONTRACT_ADDRESS],
-      });
-      console.log("Current Allowance:", currentAllowance.toString());
-
+      }) as bigint;
+  
       if (currentAllowance < parsedAmount) {
-        // Step 1: Approve the staking contract to spend BRAIDS
         try {
           const { hash: approveHash } = await approve({
             args: [STAKING_CONTRACT_ADDRESS, parsedAmount],
           });
           setDepositTxHash(approveHash);
           setDepositTxStatus("pending");
+          
           await publicClient.waitForTransactionReceipt({ hash: approveHash });
         } catch (error) {
           console.error("Approval failed:", error);
-          setError("Approval transaction failed");
+          setError("Failed to approve token transfer");
           setDepositTxStatus("error");
           return;
         }
       }
-
-      // Step 2: Deposit rewards
+  
+      // Deposit rewards
       try {
         const { hash: depositHash } = await depositRewards({
           args: [parsedAmount],
         });
         setDepositTxHash(depositHash);
         setDepositTxStatus("pending");
+        
         await publicClient.waitForTransactionReceipt({ hash: depositHash });
         
-        // Success
         setDepositTxStatus("success");
         setDepositAmount("");
         fetchData();
       } catch (error) {
         console.error("Deposit failed:", error);
-        setError("Deposit transaction failed");
+        setError("Failed to deposit rewards");
         setDepositTxStatus("error");
       }
     } catch (error) {
+      console.error("Transaction error:", error);
       setDepositTxStatus("error");
       handleTransactionError(error);
     }
